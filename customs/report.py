@@ -58,6 +58,7 @@ svg{display:block;width:100%;height:auto;touch-action:none}
 .svg-ax{font-size:11.5px;fill:#c3cde3;font-weight:700}
 .svg-mo{font-size:9.5px;fill:#6b7794}
 .svg-val{font-size:10px;fill:#c3cde3;font-weight:600}
+.badge-txt{font-size:10.5px;fill:#fff;font-weight:700}
 .chart-tip{position:fixed;z-index:9999;pointer-events:none;min-width:150px;
   background:#0b1019;border:1px solid #39456685;border-radius:10px;padding:9px 11px;
   box-shadow:0 8px 28px rgba(0,0,0,.5);font-size:12.5px;color:var(--txt);backdrop-filter:blur(2px)}
@@ -172,34 +173,71 @@ function showTip(html, clientX, clientY){
 }
 function ymLabel(period){ return period.slice(0,4)+'.'+period.slice(4); }     // 2026.03
 function ymLong(period){ return period.slice(0,4)+'년 '+(+period.slice(4))+'월'; } // 2026년 3월
+function qLabel(label){ // "2026 Q3" -> "3Q26"
+  const m=label.match(/(\d{4})\s*Q(\d)/); if(!m) return label;
+  return m[2]+'Q'+m[1].slice(2);
+}
 
-// hover 를 위한 overlay+크로스헤어 설치. geom: {m,iw,ih,W,H,X(i),n, onIndex(i)->tooltipHTML & markers}
+// 주식 차트식 hover: 세로+가로 십자선 + x축 날짜 배지(아래 뾰족) + y축 값 배지.
+// geom: {m,iw,ih,W,H,X(i),n, onIndex(i,markG)-> {html, yFocus, xBadge, yBadge}}
 function attachHover(svg, geom){
   const {m,W,H,n}=geom;
-  const ihTop=m.t, ihBot=m.t+geom.ih;
-  const cross=svgAdd(svg,'line',{x1:0,y1:ihTop,x2:0,y2:ihBot,stroke:'#8a97b1','stroke-width':1,'stroke-dasharray':'4 3',opacity:0});
+  const top=m.t, bot=m.t+geom.ih, left=m.l, right=W-m.r;
+  // 십자선 (세로/가로)
+  const vLine=svgAdd(svg,'line',{x1:0,y1:top,x2:0,y2:bot,stroke:'#9aa6c0','stroke-width':1,'stroke-dasharray':'3 3',opacity:0});
+  const hLine=svgAdd(svg,'line',{x1:left,y1:0,x2:right,y2:0,stroke:'#9aa6c0','stroke-width':1,'stroke-dasharray':'3 3',opacity:0});
   const markG=svgAdd(svg,'g',{opacity:0});
-  const overlay=svgAdd(svg,'rect',{x:m.l,y:m.t,width:geom.iw,height:geom.ih,fill:'transparent'});
+  // x축 날짜 배지 (플롯 하단 밖으로 뾰족 튀어나옴)
+  const xBadgeG=svgAdd(svg,'g',{opacity:0});
+  const xTri=svgAdd(xBadgeG,'path',{fill:'#38466a'});
+  const xRect=svgAdd(xBadgeG,'rect',{rx:3,fill:'#38466a'});
+  const xTxt=svgAdd(xBadgeG,'text',{'text-anchor':'middle',class:'badge-txt'});
+  // y축 값 배지 (왼쪽 축 위에)
+  const yBadgeG=svgAdd(svg,'g',{opacity:0});
+  const yRect=svgAdd(yBadgeG,'rect',{rx:3,fill:'#38466a'});
+  const yTxt=svgAdd(yBadgeG,'text',{'text-anchor':'end',class:'badge-txt'});
+
+  const overlay=svgAdd(svg,'rect',{x:left,y:top,width:geom.iw,height:geom.ih,fill:'transparent','pointer-events':'all'});
+
   function idxFromClient(evt){
     const r=svg.getBoundingClientRect();
-    const sx=(evt.clientX-r.left)/r.width*W;  // viewBox 좌표로 환산
+    const sx=(evt.clientX-r.left)/r.width*W;
     let best=0,bd=1e9;
     for(let i=0;i<n;i++){ const d=Math.abs(geom.X(i)-sx); if(d<bd){bd=d;best=i;} }
     return best;
   }
+  function placeXBadge(cx, label){
+    const w=Math.max(44, label.length*8+14), h=17, bx=Math.min(Math.max(cx-w/2,left-20),right-w+20), by=bot+6;
+    xRect.setAttribute('x',bx); xRect.setAttribute('y',by); xRect.setAttribute('width',w); xRect.setAttribute('height',h);
+    xTxt.setAttribute('x',bx+w/2); xTxt.setAttribute('y',by+12); xTxt.textContent=label;
+    // 삼각 꼭지 (위쪽 중앙, 플롯 경계를 향함)
+    xTri.setAttribute('d',`M${cx-5} ${by} L${cx+5} ${by} L${cx} ${by-5} Z`);
+  }
+  function placeYBadge(cy, label){
+    const w=Math.max(44, label.length*7.2+12), h=16, bx=left-w-6, by=Math.min(Math.max(cy-h/2,top),bot-h);
+    yRect.setAttribute('x',bx); yRect.setAttribute('y',by); yRect.setAttribute('width',w); yRect.setAttribute('height',h);
+    yTxt.setAttribute('x',bx+w-6); yTxt.setAttribute('y',by+11.5); yTxt.textContent=label;
+  }
   function move(evt){
     const i=idxFromClient(evt);
     const cx=geom.X(i);
-    cross.setAttribute('x1',cx); cross.setAttribute('x2',cx); cross.setAttribute('opacity',1);
     while(markG.firstChild) markG.removeChild(markG.firstChild);
-    const res=geom.onIndex(i, markG); // 마커 그리고 HTML 반환
+    const res=geom.onIndex(i, markG);
+    vLine.setAttribute('x1',cx); vLine.setAttribute('x2',cx); vLine.setAttribute('opacity',1);
     markG.setAttribute('opacity',1);
-    showTip(res, evt.clientX, evt.clientY);
+    // 가로선 + y배지 (yFocus 가 있을 때만)
+    if(res.yFocus!=null){
+      hLine.setAttribute('y1',res.yFocus); hLine.setAttribute('y2',res.yFocus); hLine.setAttribute('opacity',1);
+      if(res.yBadge!=null){ placeYBadge(res.yFocus,res.yBadge); yBadgeG.setAttribute('opacity',1); } else yBadgeG.setAttribute('opacity',0);
+    } else { hLine.setAttribute('opacity',0); yBadgeG.setAttribute('opacity',0); }
+    // x배지
+    if(res.xBadge!=null){ placeXBadge(cx,res.xBadge); xBadgeG.setAttribute('opacity',1); } else xBadgeG.setAttribute('opacity',0);
+    showTip(res.html, evt.clientX, evt.clientY);
   }
-  function leave(){ cross.setAttribute('opacity',0); markG.setAttribute('opacity',0); hideTip(); }
+  function leave(){ vLine.setAttribute('opacity',0); hLine.setAttribute('opacity',0); markG.setAttribute('opacity',0);
+    xBadgeG.setAttribute('opacity',0); yBadgeG.setAttribute('opacity',0); hideTip(); }
   overlay.addEventListener('mousemove',move);
   overlay.addEventListener('mouseleave',leave);
-  // 터치
   overlay.addEventListener('touchmove',e=>{ if(e.touches[0]){move(e.touches[0]); e.preventDefault();} },{passive:false});
   overlay.addEventListener('touchend',leave);
 }
@@ -207,7 +245,7 @@ function attachHover(svg, geom){
 // ---------- SVG 차트 ----------
 function lineChart(series, opts){
   // series: [{period, exp_dlr, imp_dlr}] 오름차순
-  const W=opts.w||920, H=opts.h||330, m={t:18,r:18,b:40,l:70};
+  const W=opts.w||920, H=opts.h||344, m={t:18,r:18,b:48,l:70};
   const iw=W-m.l-m.r, ih=H-m.t-m.b;
   const keys=opts.keys; // [{field,color,name}]
   let maxv=0;
@@ -233,15 +271,16 @@ function lineChart(series, opts){
     add('line',{x1:m.l,y1:y,x2:W-m.r,y2:y,stroke:'#273149','stroke-width':1});
     const t=add('text',{x:m.l-8,y:y+3.5,'text-anchor':'end'}); t.setAttribute('class','svg-tip'); t.textContent=fmtUSD(v);
   }
-  // x축: 연 경계는 굵은 라벨+구분선, 그 사이 분기(4/7/10월)는 옅은 월 눈금
-  let lastYear=null;
+  // x축: 연 경계(1월)는 굵은 라벨+구분선, 그 사이 분기(4/7/10월)는 옅은 월 눈금.
+  // 간격이 안 맞는 맨 왼쪽(1월이 아닌 시작월) 연도 라벨은 생략한다.
+  const axY=H-m.b+26;
   series.forEach((d,i)=>{
     const yr=d.period.slice(0,4), mo=d.period.slice(4);
-    if(yr!==lastYear){ lastYear=yr;
+    if(mo==='01'){
       add('line',{x1:X(i),y1:m.t,x2:X(i),y2:m.t+ih,stroke:'#303c58','stroke-width':1});
-      const t=add('text',{x:X(i),y:H-10,'text-anchor':'middle'}); t.setAttribute('class','svg-ax'); t.textContent=yr;
+      const t=add('text',{x:X(i),y:axY,'text-anchor':'middle'}); t.setAttribute('class','svg-ax'); t.textContent=yr;
     } else if(mo==='04'||mo==='07'||mo==='10'){
-      const t=add('text',{x:X(i),y:H-11,'text-anchor':'middle'}); t.setAttribute('class','svg-mo'); t.textContent=mo+'월';
+      const t=add('text',{x:X(i),y:axY,'text-anchor':'middle'}); t.setAttribute('class','svg-mo'); t.textContent=(+mo)+'월';
       add('line',{x1:X(i),y1:m.t+ih-4,x2:X(i),y2:m.t+ih,stroke:'#3a4765','stroke-width':1});
     }
   });
@@ -266,18 +305,20 @@ function lineChart(series, opts){
     keys.forEach(k=>{ rows+=`<div class="tr"><span class="dot" style="background:${k.color}"></span>${k.name}<b>${fmtUSD(d[k.field]||0)}</b></div>`; });
     const bal=(d.exp_dlr||0)-(d.imp_dlr||0);
     rows+=`<div class="tr sub">무역수지<b class="${bal>=0?'pos':'neg'}">${fmtUSD(bal)}</b></div>`;
-    return `<div class="th">${ymLong(d.period)}</div>${rows}`;
+    // 가로 십자선은 주 계열(첫번째=수출)에 맞춤
+    const prim=keys[0], yF=Y(d[prim.field]||0);
+    return {html:`<div class="th">${ymLong(d.period)}</div>${rows}`, yFocus:yF, xBadge:ymLabel(d.period), yBadge:fmtUSD(d[prim.field]||0)};
   }});
   return svg;
 }
 
 function barChart(items, opts){
-  // items: [{label, value}], value 는 % (음수 가능). label 예: "2026Q3"
+  // items: [{label, value}], label 은 "2026 Q3", value 는 % (음수 가능)
   items=items.filter(d=>d.value!=null);
   if(!items.length){ const s=document.createElementNS(SVGNS,'svg'); s.setAttribute('viewBox','0 0 460 120');
     svgAdd(s,'text',{x:230,y:60,'text-anchor':'middle',class:'svg-tip'}).textContent='데이터가 부족합니다';
     return s; }
-  const W=opts.w||460, H=opts.h||280, m={t:16,r:14,b:46,l:52};
+  const W=opts.w||460, H=opts.h||284, m={t:16,r:14,b:50,l:52};
   const iw=W-m.l-m.r, ih=H-m.t-m.b;
   const vals=items.map(d=>d.value);
   const {lo,hi}=niceBounds(Math.min(...vals),Math.max(...vals));
@@ -306,16 +347,17 @@ function barChart(items, opts){
     }
     if(i%labelEvery===0 || i===n-1){
       const t=add('text',{x:cx,y:H-m.b+16,'text-anchor':'end',transform:`rotate(-40 ${cx} ${H-m.b+16})`});
-      t.setAttribute('class','svg-ax'); t.textContent=d.label;
+      t.setAttribute('class','svg-ax'); t.textContent=qLabel(d.label);
     }
   });
   // hover
   attachHover(svg,{m,iw,ih,W,H,n,X:cxOf,onIndex:(i,markG)=>{
-    const d=items[i];
+    const d=items[i], v=d.value, yF=Y(v);
     bars.forEach((b,bi)=>b.setAttribute('opacity', bi===i?1:0.35));
     svgAdd(markG,'rect',{x:cxOf(i)-bw/2-2,y:m.t,width:bw+4,height:ih,fill:'#ffffff',opacity:0.04});
-    return `<div class="th">${d.label.replace('Q',' Q')}</div>`+
-           `<div class="tr"><span class="dot" style="background:${d.value>=0?'#4a90ff':'#ff5c6c'}"></span>수출 QoQ<b class="${d.value>=0?'pos':'neg'}">${fmtPct(d.value)}</b></div>`;
+    return {html:`<div class="th">${qLabel(d.label)}</div>`+
+           `<div class="tr"><span class="dot" style="background:${v>=0?'#4a90ff':'#ff5c6c'}"></span>수출 QoQ<b class="${v>=0?'pos':'neg'}">${fmtPct(v)}</b></div>`,
+           yFocus:yF, xBadge:qLabel(d.label), yBadge:(v>=0?'+':'')+v.toFixed(1)+'%'};
   }});
   svg.addEventListener('mouseleave',()=>bars.forEach(b=>b.setAttribute('opacity',1)));
   return svg;
@@ -336,7 +378,7 @@ function groupedBar(series, opts){
   if(!series.length){ const s=document.createElementNS(SVGNS,'svg'); s.setAttribute('viewBox','0 0 460 120');
     svgAdd(s,'text',{x:230,y:60,'text-anchor':'middle',class:'svg-tip'}).textContent='전년동월 데이터가 아직 없습니다';
     return s; }
-  const W=opts.w||460, H=opts.h||280, m={t:16,r:14,b:34,l:52};
+  const W=opts.w||460, H=opts.h||288, m={t:16,r:14,b:42,l:52};
   const iw=W-m.l-m.r, ih=H-m.t-m.b;
   const all=[]; series.forEach(d=>{ if(d.expYoy!=null)all.push(d.expYoy); if(d.impYoy!=null)all.push(d.impYoy);});
   const {lo,hi}=niceBounds(Math.min(...all),Math.max(...all));
@@ -346,13 +388,13 @@ function groupedBar(series, opts){
   const add=(tag,at)=>svgAdd(svg,tag,at);
   const Y=v=> m.t + ih - ((v-lo)/(hi-lo))*ih; const zeroY=Y(0);
   const cxOf=i=> m.l+step*i+step/2;
+  const axY=H-m.b+24;
   for(let g=0;g<=4;g++){ const v=lo+(hi-lo)*g/4,y=Y(v);
     add('line',{x1:m.l,y1:y,x2:W-m.r,y2:y,stroke:'#273149','stroke-width':1});
     const t=add('text',{x:m.l-8,y:y+3.5,'text-anchor':'end'});t.setAttribute('class','svg-tip');t.textContent=v.toFixed(0)+'%';
   }
   add('line',{x1:m.l,y1:zeroY,x2:W-m.r,y2:zeroY,stroke:'#4a5675','stroke-width':1.4});
   const bw=Math.max(1.5, Math.min(9, step*0.34));
-  let lastYear=null;
   series.forEach((d,i)=>{
     const cx=cxOf(i);
     [['expYoy','#4a90ff',-1],['impYoy','#ff5c6c',1]].forEach(([f,c,s])=>{
@@ -360,9 +402,10 @@ function groupedBar(series, opts){
       const y=Y(v),h=Math.abs(y-zeroY);
       add('rect',{x:cx+(s*bw/2)-(bw/2)+(s*0.6),y:Math.min(y,zeroY),width:bw,height:Math.max(1,h),fill:c,rx:1.5});
     });
-    const yr=d.period.slice(0,4);
-    if(yr!==lastYear){lastYear=yr;const t=add('text',{x:cx,y:H-10,'text-anchor':'middle'});t.setAttribute('class','svg-ax');t.textContent=yr;}
-    else if(d.period.slice(4)==='07'){const t=add('text',{x:cx,y:H-10,'text-anchor':'middle'});t.setAttribute('class','svg-mo');t.textContent='7월';}
+    // 간격 안 맞는 좌측 연도는 생략: 1월 경계만 연도 라벨, 7월은 옅은 눈금
+    const mo=d.period.slice(4);
+    if(mo==='01'){const t=add('text',{x:cx,y:axY,'text-anchor':'middle'});t.setAttribute('class','svg-ax');t.textContent=d.period.slice(0,4);}
+    else if(mo==='07'){const t=add('text',{x:cx,y:axY,'text-anchor':'middle'});t.setAttribute('class','svg-mo');t.textContent='7월';}
   });
   // hover
   attachHover(svg,{m,iw,ih,W,H,n,X:cxOf,onIndex:(i,markG)=>{
@@ -371,7 +414,9 @@ function groupedBar(series, opts){
     let rows='';
     if(d.expYoy!=null) rows+=`<div class="tr"><span class="dot" style="background:#4a90ff"></span>수출 YoY<b class="${d.expYoy>=0?'pos':'neg'}">${fmtPct(d.expYoy)}</b></div>`;
     if(d.impYoy!=null) rows+=`<div class="tr"><span class="dot" style="background:#ff5c6c"></span>수입 YoY<b class="${d.impYoy>=0?'pos':'neg'}">${fmtPct(d.impYoy)}</b></div>`;
-    return `<div class="th">${ymLong(d.period)}</div>${rows}`;
+    const yF = d.expYoy!=null ? Y(d.expYoy) : (d.impYoy!=null?Y(d.impYoy):null);
+    const yB = d.expYoy!=null ? (d.expYoy>=0?'+':'')+d.expYoy.toFixed(1)+'%' : null;
+    return {html:`<div class="th">${ymLong(d.period)}</div>${rows}`, yFocus:yF, xBadge:ymLabel(d.period), yBadge:yB};
   }});
   return svg;
 }
@@ -482,7 +527,7 @@ function renderDetail(detail){
   row.appendChild(p1);
   const p2=el('div',{class:'panel'});
   p2.appendChild(el('h2',{},['전분기 대비 증감률 (수출 QoQ %)']));
-  p2.appendChild(barChart(detail.qExp.map(d=>({label:d.label.replace(' ',''),value:d.qoq})),{}));
+  p2.appendChild(barChart(detail.qExp.map(d=>({label:d.label,value:d.qoq})),{}));
   row.appendChild(p2);
   app.appendChild(row);
 

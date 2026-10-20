@@ -1,0 +1,12 @@
+# 일본 재무성 무역통계(e-Stat) 수출입 대시보드 설정
+# 필요한 항목만 지정하면 나머지는 기본값을 사용합니다.
+
+port: 8002          # 서버 포트
+auto_open: true     # 서버 실행 시 브라우저 자동 오픈
+
+estat:
+  # e-Stat appId 는 보안을 위해 .env(ESTAT_APP_ID) 에 두는 것을 권장합니다.
+  # 아래 app_id 를 지정하면 .env 보다 우선합니다.
+  app_id: null
+  years: 5          # 수집할 과거 연수 (기본 5년)
+  db_path: data/jptrade.db

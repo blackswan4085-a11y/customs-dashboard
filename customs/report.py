@@ -54,7 +54,9 @@ tr.leaf:hover td{background:transparent}
 .legend{display:flex;gap:16px;font-size:12px;color:var(--muted);margin-bottom:6px}
 .legend .dot{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:middle}
 svg{display:block;width:100%;height:auto}
-.svg-tip{font-size:11px;fill:var(--muted)}
+.svg-tip{font-size:10.5px;fill:var(--muted)}
+.svg-ax{font-size:11px;fill:#aab6d0;font-weight:600}
+.svg-val{font-size:10px;fill:#c3cde3;font-weight:600}
 .companies .co{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
 .companies .co .nm{font-weight:600}
 .companies .co .nt{color:var(--muted);flex:1;font-size:12.5px}
@@ -145,13 +147,12 @@ function pathKey(){ return state.path.join('/'); }
 // ---------- SVG 차트 ----------
 function lineChart(series, opts){
   // series: [{period, exp_dlr, imp_dlr}] 오름차순
-  const W=opts.w||920, H=opts.h||300, m={t:14,r:16,b:28,l:62};
+  const W=opts.w||920, H=opts.h||320, m={t:18,r:18,b:30,l:66};
   const iw=W-m.l-m.r, ih=H-m.t-m.b;
-  const xs=series.map((d,i)=>i);
   const keys=opts.keys; // [{field,color,name}]
   let maxv=0;
   series.forEach(d=>keys.forEach(k=>{maxv=Math.max(maxv,d[k.field]||0)}));
-  maxv=maxv||1;
+  maxv=(maxv||1)*1.08;
   const n=series.length;
   const X=i=> m.l + (n<=1?iw/2:(i/(n-1))*iw);
   const Y=v=> m.t + ih - (v/maxv)*ih;
@@ -160,101 +161,147 @@ function lineChart(series, opts){
   svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
   svg.setAttribute('preserveAspectRatio','xMidYMid meet');
   function add(tag,at){const e=document.createElementNS(svgns,tag);for(const k in at)e.setAttribute(k,at[k]);return e;}
+  // 그라데이션 정의
+  const defs=add('defs',{});
+  keys.forEach((k,ki)=>{
+    const gid='g'+ki+'_'+Math.random().toString(36).slice(2,7);
+    k._gid=gid;
+    const lg=add('linearGradient',{id:gid,x1:0,y1:0,x2:0,y2:1});
+    lg.appendChild(add('stop',{offset:'0%','stop-color':k.color,'stop-opacity':0.28}));
+    lg.appendChild(add('stop',{offset:'100%','stop-color':k.color,'stop-opacity':0}));
+    defs.appendChild(lg);
+  });
+  svg.appendChild(defs);
   // y축 그리드 4칸
   for(let g=0; g<=4; g++){
     const v=maxv*g/4, y=Y(v);
-    svg.appendChild(add('line',{x1:m.l,y1:y,x2:W-m.r,y2:y,stroke:'#2a3550','stroke-width':1}));
-    const t=add('text',{x:m.l-8,y:y+4,'text-anchor':'end'}); t.setAttribute('class','svg-tip');
+    svg.appendChild(add('line',{x1:m.l,y1:y,x2:W-m.r,y2:y,stroke:'#273149','stroke-width':1}));
+    const t=add('text',{x:m.l-8,y:y+3.5,'text-anchor':'end'}); t.setAttribute('class','svg-tip');
     t.textContent=fmtUSD(v); svg.appendChild(t);
   }
-  // x축 라벨 (연 단위)
+  // x축 연도 구분선/라벨
   let lastYear=null;
   series.forEach((d,i)=>{
     const yr=d.period.slice(0,4);
     if(yr!==lastYear){ lastYear=yr;
-      const t=add('text',{x:X(i),y:H-8,'text-anchor':'middle'}); t.setAttribute('class','svg-tip');
+      const t=add('text',{x:X(i),y:H-9,'text-anchor':'middle'}); t.setAttribute('class','svg-ax');
       t.textContent=yr; svg.appendChild(t);
-      svg.appendChild(add('line',{x1:X(i),y1:m.t,x2:X(i),y2:m.t+ih,stroke:'#223',  'stroke-width':1}));
+      svg.appendChild(add('line',{x1:X(i),y1:m.t,x2:X(i),y2:m.t+ih,stroke:'#1c2435','stroke-width':1}));
     }
   });
-  // 라인
+  // 면적 + 라인
   keys.forEach(k=>{
-    let dpath='';
-    series.forEach((d,i)=>{ dpath+=(i===0?'M':'L')+X(i)+' '+Y(d[k.field]||0)+' '; });
-    svg.appendChild(add('path',{d:dpath,fill:'none',stroke:k.color,'stroke-width':2,'stroke-linejoin':'round'}));
+    let dpath='', area='';
+    series.forEach((d,i)=>{ const px=X(i),py=Y(d[k.field]||0);
+      dpath+=(i===0?'M':'L')+px.toFixed(1)+' '+py.toFixed(1)+' ';
+      area+=(i===0?('M'+px.toFixed(1)+' '+(m.t+ih)+' L'):'L')+px.toFixed(1)+' '+py.toFixed(1)+' ';
+    });
+    area+='L'+X(n-1).toFixed(1)+' '+(m.t+ih)+' Z';
+    svg.appendChild(add('path',{d:area,fill:'url(#'+k._gid+')',stroke:'none'}));
+    svg.appendChild(add('path',{d:dpath,fill:'none',stroke:k.color,'stroke-width':2.2,'stroke-linejoin':'round','stroke-linecap':'round'}));
+    // 마지막 점 강조
+    const last=series[n-1];
+    svg.appendChild(add('circle',{cx:X(n-1),cy:Y(last[k.field]||0),r:3.2,fill:k.color,stroke:'#0f1420','stroke-width':1.5}));
   });
   return svg;
 }
 
 function barChart(items, opts){
-  // items: [{label, value}], value 는 % (음수 가능)
-  const W=opts.w||450, H=opts.h||260, m={t:14,r:12,b:40,l:46};
-  const iw=W-m.l-m.r, ih=H-m.t-m.b;
-  const vals=items.map(d=>d.value===null?0:d.value);
-  let maxv=Math.max(1,...vals.map(v=>v)), minv=Math.min(0,...vals.map(v=>v));
-  if(maxv===minv){maxv=maxv+1;}
-  const n=items.length;
-  const bw=iw/Math.max(1,n)*0.64;
+  // items: [{label, value}], value 는 % (음수 가능). label 예: "2026Q3"
+  items=items.filter(d=>d.value!=null);
   const svgns='http://www.w3.org/2000/svg';
+  if(!items.length){ const s=document.createElementNS(svgns,'svg'); s.setAttribute('viewBox','0 0 460 120');
+    const t=document.createElementNS(svgns,'text');t.setAttribute('x',230);t.setAttribute('y',60);
+    t.setAttribute('text-anchor','middle');t.setAttribute('class','svg-tip');t.textContent='데이터가 부족합니다';
+    s.appendChild(t); return s; }
+  const W=opts.w||460, H=opts.h||280, m={t:16,r:14,b:46,l:52};
+  const iw=W-m.l-m.r, ih=H-m.t-m.b;
+  const vals=items.map(d=>d.value);
+  const {lo,hi}=niceBounds(Math.min(...vals),Math.max(...vals));
+  const n=items.length, step=iw/n;
   const svg=document.createElementNS(svgns,'svg');
   svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
   svg.setAttribute('preserveAspectRatio','xMidYMid meet');
   function add(tag,at){const e=document.createElementNS(svgns,tag);for(const k in at)e.setAttribute(k,at[k]);return e;}
-  const Y=v=> m.t + ih - ((v-minv)/(maxv-minv))*ih;
+  const Y=v=> m.t + ih - ((v-lo)/(hi-lo))*ih;
   const zeroY=Y(0);
   // 그리드
   for(let g=0;g<=4;g++){
-    const v=minv+(maxv-minv)*g/4, y=Y(v);
-    svg.appendChild(add('line',{x1:m.l,y1:y,x2:W-m.r,y2:y,stroke:'#2a3550','stroke-width':1}));
-    const t=add('text',{x:m.l-6,y:y+4,'text-anchor':'end'}); t.setAttribute('class','svg-tip');
+    const v=lo+(hi-lo)*g/4, y=Y(v);
+    svg.appendChild(add('line',{x1:m.l,y1:y,x2:W-m.r,y2:y,stroke:'#273149','stroke-width':1}));
+    const t=add('text',{x:m.l-8,y:y+3.5,'text-anchor':'end'}); t.setAttribute('class','svg-tip');
     t.textContent=v.toFixed(0)+'%'; svg.appendChild(t);
   }
-  const step=iw/Math.max(1,n);
+  // 0% 기준선 강조
+  svg.appendChild(add('line',{x1:m.l,y1:zeroY,x2:W-m.r,y2:zeroY,stroke:'#4a5675','stroke-width':1.4}));
+  const bw=Math.max(3, Math.min(26, step*0.6));
+  // 라벨 밀도: 겹치지 않도록 간격 계산 (최소 34px 간격)
+  const labelEvery=Math.max(1, Math.ceil(34/step));
   items.forEach((d,i)=>{
     const cx=m.l+step*i+step/2;
-    const v=d.value===null?null:d.value;
-    if(v!==null){
-      const y=Y(v), h=Math.abs(y-zeroY);
-      svg.appendChild(add('rect',{x:cx-bw/2,y:Math.min(y,zeroY),width:bw,height:Math.max(1,h),
-        fill: v>=0?'#4a90ff':'#ff5c6c', rx:2}));
+    const v=d.value;
+    const y=Y(v), h=Math.abs(y-zeroY);
+    svg.appendChild(add('rect',{x:cx-bw/2,y:Math.min(y,zeroY),width:bw,height:Math.max(1,h),
+      fill: v>=0?'#4a90ff':'#ff5c6c', rx:2}));
+    // 값 라벨 (막대 끝)
+    if(n<=14){
+      const ty = v>=0 ? Math.min(y,zeroY)-4 : Math.max(y,zeroY)+12;
+      const vt=add('text',{x:cx,y:ty,'text-anchor':'middle'}); vt.setAttribute('class','svg-val');
+      vt.textContent=(v>=0?'+':'')+v.toFixed(0); svg.appendChild(vt);
     }
-    // 라벨 (너무 많으면 건너뜀)
-    if(n<=20 || i%Math.ceil(n/14)===0){
-      const t=add('text',{x:cx,y:H-6,'text-anchor':'middle'}); t.setAttribute('class','svg-tip');
-      t.textContent=d.label; svg.appendChild(t);
+    // x축 라벨 (회전해서 잘림 방지)
+    if(i%labelEvery===0 || i===n-1){
+      const t=add('text',{x:cx,y:H-m.b+16,'text-anchor':'end',transform:`rotate(-40 ${cx} ${H-m.b+16})`});
+      t.setAttribute('class','svg-ax'); t.textContent=d.label; svg.appendChild(t);
     }
   });
   return svg;
 }
 
+function niceBounds(minv, maxv){
+  // 0 을 항상 포함하고 보기 좋은 min/max 로 확장
+  minv=Math.min(0,minv); maxv=Math.max(0,maxv);
+  if(minv===maxv){ maxv=1; }
+  const span=maxv-minv||1;
+  const pad=span*0.12;
+  return {lo:minv-(minv<0?pad:0), hi:maxv+pad};
+}
+
 function groupedBar(series, opts){
-  // series:[{period, expYoy, impYoy}] YoY 두 계열
-  const W=opts.w||450, H=opts.h||260, m={t:14,r:12,b:34,l:46};
+  // series:[{period, expYoy, impYoy}] YoY 두 계열. null(앞 12개월) 구간은 잘라낸다.
+  series=series.filter(d=>d.expYoy!=null || d.impYoy!=null);
+  const svgns='http://www.w3.org/2000/svg';
+  if(!series.length){ const s=document.createElementNS(svgns,'svg'); s.setAttribute('viewBox','0 0 450 120');
+    const t=document.createElementNS(svgns,'text');t.setAttribute('x',225);t.setAttribute('y',60);
+    t.setAttribute('text-anchor','middle');t.setAttribute('class','svg-tip');t.textContent='전년동월 데이터가 아직 없습니다';
+    s.appendChild(t); return s; }
+  const W=opts.w||460, H=opts.h||280, m={t:16,r:14,b:30,l:52};
   const iw=W-m.l-m.r, ih=H-m.t-m.b;
   const all=[]; series.forEach(d=>{ if(d.expYoy!=null)all.push(d.expYoy); if(d.impYoy!=null)all.push(d.impYoy);});
-  let maxv=Math.max(1,...all), minv=Math.min(0,...all);
-  if(maxv===minv)maxv+=1;
-  const n=series.length, step=iw/Math.max(1,n);
-  const svgns='http://www.w3.org/2000/svg';
+  const {lo,hi}=niceBounds(Math.min(...all),Math.max(...all));
+  const n=series.length, step=iw/n;
   const svg=document.createElementNS(svgns,'svg');
   svg.setAttribute('viewBox',`0 0 ${W} ${H}`); svg.setAttribute('preserveAspectRatio','xMidYMid meet');
   function add(tag,at){const e=document.createElementNS(svgns,tag);for(const k in at)e.setAttribute(k,at[k]);return e;}
-  const Y=v=> m.t + ih - ((v-minv)/(maxv-minv))*ih; const zeroY=Y(0);
-  for(let g=0;g<=4;g++){ const v=minv+(maxv-minv)*g/4,y=Y(v);
-    svg.appendChild(add('line',{x1:m.l,y1:y,x2:W-m.r,y2:y,stroke:'#2a3550','stroke-width':1}));
-    const t=add('text',{x:m.l-6,y:y+4,'text-anchor':'end'});t.setAttribute('class','svg-tip');t.textContent=v.toFixed(0)+'%';svg.appendChild(t);
+  const Y=v=> m.t + ih - ((v-lo)/(hi-lo))*ih; const zeroY=Y(0);
+  // 그리드
+  for(let g=0;g<=4;g++){ const v=lo+(hi-lo)*g/4,y=Y(v);
+    svg.appendChild(add('line',{x1:m.l,y1:y,x2:W-m.r,y2:y,stroke:'#273149','stroke-width':1}));
+    const t=add('text',{x:m.l-8,y:y+3.5,'text-anchor':'end'});t.setAttribute('class','svg-tip');t.textContent=v.toFixed(0)+'%';svg.appendChild(t);
   }
-  const bw=Math.max(1.4,step*0.3);
+  // 0% 기준선 강조
+  svg.appendChild(add('line',{x1:m.l,y1:zeroY,x2:W-m.r,y2:zeroY,stroke:'#4a5675','stroke-width':1.4}));
+  const bw=Math.max(1.5, Math.min(9, step*0.34));
   let lastYear=null;
   series.forEach((d,i)=>{
     const cx=m.l+step*i+step/2;
     [['expYoy','#4a90ff',-1],['impYoy','#ff5c6c',1]].forEach(([f,c,s])=>{
       const v=d[f]; if(v==null)return;
       const y=Y(v),h=Math.abs(y-zeroY);
-      svg.appendChild(add('rect',{x:cx+s*bw/2-bw/2+(s<0?-0.5:0.5),y:Math.min(y,zeroY),width:bw,height:Math.max(1,h),fill:c,rx:1}));
+      svg.appendChild(add('rect',{x:cx+(s*bw/2)-(bw/2)+(s*0.6),y:Math.min(y,zeroY),width:bw,height:Math.max(1,h),fill:c,rx:1.5}));
     });
     const yr=d.period.slice(0,4);
-    if(yr!==lastYear){lastYear=yr;const t=add('text',{x:cx,y:H-6,'text-anchor':'middle'});t.setAttribute('class','svg-tip');t.textContent=yr;svg.appendChild(t);}
+    if(yr!==lastYear){lastYear=yr;const t=add('text',{x:cx,y:H-9,'text-anchor':'middle'});t.setAttribute('class','svg-ax');t.textContent=yr;svg.appendChild(t);}
   });
   return svg;
 }

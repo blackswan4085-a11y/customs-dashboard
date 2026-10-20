@@ -53,10 +53,19 @@ tr.leaf:hover td{background:transparent}
 .chart-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 .legend{display:flex;gap:16px;font-size:12px;color:var(--muted);margin-bottom:6px}
 .legend .dot{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:middle}
-svg{display:block;width:100%;height:auto}
+svg{display:block;width:100%;height:auto;touch-action:none}
 .svg-tip{font-size:10.5px;fill:var(--muted)}
-.svg-ax{font-size:11px;fill:#aab6d0;font-weight:600}
+.svg-ax{font-size:11.5px;fill:#c3cde3;font-weight:700}
+.svg-mo{font-size:9.5px;fill:#6b7794}
 .svg-val{font-size:10px;fill:#c3cde3;font-weight:600}
+.chart-tip{position:fixed;z-index:9999;pointer-events:none;min-width:150px;
+  background:#0b1019;border:1px solid #39456685;border-radius:10px;padding:9px 11px;
+  box-shadow:0 8px 28px rgba(0,0,0,.5);font-size:12.5px;color:var(--txt);backdrop-filter:blur(2px)}
+.chart-tip .th{font-weight:700;margin-bottom:6px;color:#fff;border-bottom:1px solid #2a3550;padding-bottom:5px}
+.chart-tip .tr{display:flex;align-items:center;gap:7px;padding:2px 0;white-space:nowrap}
+.chart-tip .tr b{margin-left:auto;font-variant-numeric:tabular-nums}
+.chart-tip .tr.sub{color:var(--muted);font-size:11.5px;margin-top:2px}
+.chart-tip .dot{width:9px;height:9px;border-radius:2px;display:inline-block}
 .companies .co{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
 .companies .co .nm{font-weight:600}
 .companies .co .nt{color:var(--muted);flex:1;font-size:12.5px}
@@ -144,10 +153,61 @@ const state={ path:[] }; // ['85','8542','854232'] 최대 3
 
 function pathKey(){ return state.path.join('/'); }
 
+// ---------- 공통: 툴팁 + 차트 래퍼 ----------
+const SVGNS='http://www.w3.org/2000/svg';
+function svgAdd(parent,tag,at){const e=document.createElementNS(SVGNS,tag);for(const k in at)e.setAttribute(k,at[k]);parent.appendChild(e);return e;}
+let _tipEl=null;
+function tipEl(){
+  if(!_tipEl){ _tipEl=document.createElement('div'); _tipEl.className='chart-tip'; _tipEl.style.display='none'; document.body.appendChild(_tipEl); }
+  return _tipEl;
+}
+function hideTip(){ tipEl().style.display='none'; }
+function showTip(html, clientX, clientY){
+  const t=tipEl(); t.innerHTML=html; t.style.display='block';
+  const pad=14, tw=t.offsetWidth, th=t.offsetHeight;
+  let x=clientX+pad, y=clientY+pad;
+  if(x+tw>window.innerWidth-8) x=clientX-tw-pad;
+  if(y+th>window.innerHeight-8) y=clientY-th-pad;
+  t.style.left=Math.max(6,x)+'px'; t.style.top=Math.max(6,y)+'px';
+}
+function ymLabel(period){ return period.slice(0,4)+'.'+period.slice(4); }     // 2026.03
+function ymLong(period){ return period.slice(0,4)+'년 '+(+period.slice(4))+'월'; } // 2026년 3월
+
+// hover 를 위한 overlay+크로스헤어 설치. geom: {m,iw,ih,W,H,X(i),n, onIndex(i)->tooltipHTML & markers}
+function attachHover(svg, geom){
+  const {m,W,H,n}=geom;
+  const ihTop=m.t, ihBot=m.t+geom.ih;
+  const cross=svgAdd(svg,'line',{x1:0,y1:ihTop,x2:0,y2:ihBot,stroke:'#8a97b1','stroke-width':1,'stroke-dasharray':'4 3',opacity:0});
+  const markG=svgAdd(svg,'g',{opacity:0});
+  const overlay=svgAdd(svg,'rect',{x:m.l,y:m.t,width:geom.iw,height:geom.ih,fill:'transparent'});
+  function idxFromClient(evt){
+    const r=svg.getBoundingClientRect();
+    const sx=(evt.clientX-r.left)/r.width*W;  // viewBox 좌표로 환산
+    let best=0,bd=1e9;
+    for(let i=0;i<n;i++){ const d=Math.abs(geom.X(i)-sx); if(d<bd){bd=d;best=i;} }
+    return best;
+  }
+  function move(evt){
+    const i=idxFromClient(evt);
+    const cx=geom.X(i);
+    cross.setAttribute('x1',cx); cross.setAttribute('x2',cx); cross.setAttribute('opacity',1);
+    while(markG.firstChild) markG.removeChild(markG.firstChild);
+    const res=geom.onIndex(i, markG); // 마커 그리고 HTML 반환
+    markG.setAttribute('opacity',1);
+    showTip(res, evt.clientX, evt.clientY);
+  }
+  function leave(){ cross.setAttribute('opacity',0); markG.setAttribute('opacity',0); hideTip(); }
+  overlay.addEventListener('mousemove',move);
+  overlay.addEventListener('mouseleave',leave);
+  // 터치
+  overlay.addEventListener('touchmove',e=>{ if(e.touches[0]){move(e.touches[0]); e.preventDefault();} },{passive:false});
+  overlay.addEventListener('touchend',leave);
+}
+
 // ---------- SVG 차트 ----------
 function lineChart(series, opts){
   // series: [{period, exp_dlr, imp_dlr}] 오름차순
-  const W=opts.w||920, H=opts.h||320, m={t:18,r:18,b:30,l:66};
+  const W=opts.w||920, H=opts.h||330, m={t:18,r:18,b:40,l:70};
   const iw=W-m.l-m.r, ih=H-m.t-m.b;
   const keys=opts.keys; // [{field,color,name}]
   let maxv=0;
@@ -156,37 +216,33 @@ function lineChart(series, opts){
   const n=series.length;
   const X=i=> m.l + (n<=1?iw/2:(i/(n-1))*iw);
   const Y=v=> m.t + ih - (v/maxv)*ih;
-  const svgns='http://www.w3.org/2000/svg';
-  const svg=document.createElementNS(svgns,'svg');
+  const svg=document.createElementNS(SVGNS,'svg');
   svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
   svg.setAttribute('preserveAspectRatio','xMidYMid meet');
-  function add(tag,at){const e=document.createElementNS(svgns,tag);for(const k in at)e.setAttribute(k,at[k]);return e;}
-  // 그라데이션 정의
+  const add=(tag,at)=>svgAdd(svg,tag,at);
+  // 그라데이션
   const defs=add('defs',{});
   keys.forEach((k,ki)=>{
-    const gid='g'+ki+'_'+Math.random().toString(36).slice(2,7);
-    k._gid=gid;
-    const lg=add('linearGradient',{id:gid,x1:0,y1:0,x2:0,y2:1});
-    lg.appendChild(add('stop',{offset:'0%','stop-color':k.color,'stop-opacity':0.28}));
-    lg.appendChild(add('stop',{offset:'100%','stop-color':k.color,'stop-opacity':0}));
-    defs.appendChild(lg);
+    const gid='g'+ki+'_'+Math.random().toString(36).slice(2,7); k._gid=gid;
+    const lg=svgAdd(defs,'linearGradient',{id:gid,x1:0,y1:0,x2:0,y2:1});
+    svgAdd(lg,'stop',{offset:'0%','stop-color':k.color,'stop-opacity':0.26});
+    svgAdd(lg,'stop',{offset:'100%','stop-color':k.color,'stop-opacity':0});
   });
-  svg.appendChild(defs);
-  // y축 그리드 4칸
-  for(let g=0; g<=4; g++){
-    const v=maxv*g/4, y=Y(v);
-    svg.appendChild(add('line',{x1:m.l,y1:y,x2:W-m.r,y2:y,stroke:'#273149','stroke-width':1}));
-    const t=add('text',{x:m.l-8,y:y+3.5,'text-anchor':'end'}); t.setAttribute('class','svg-tip');
-    t.textContent=fmtUSD(v); svg.appendChild(t);
+  // y 그리드
+  for(let g=0; g<=4; g++){ const v=maxv*g/4, y=Y(v);
+    add('line',{x1:m.l,y1:y,x2:W-m.r,y2:y,stroke:'#273149','stroke-width':1});
+    const t=add('text',{x:m.l-8,y:y+3.5,'text-anchor':'end'}); t.setAttribute('class','svg-tip'); t.textContent=fmtUSD(v);
   }
-  // x축 연도 구분선/라벨
+  // x축: 연 경계는 굵은 라벨+구분선, 그 사이 분기(4/7/10월)는 옅은 월 눈금
   let lastYear=null;
   series.forEach((d,i)=>{
-    const yr=d.period.slice(0,4);
+    const yr=d.period.slice(0,4), mo=d.period.slice(4);
     if(yr!==lastYear){ lastYear=yr;
-      const t=add('text',{x:X(i),y:H-9,'text-anchor':'middle'}); t.setAttribute('class','svg-ax');
-      t.textContent=yr; svg.appendChild(t);
-      svg.appendChild(add('line',{x1:X(i),y1:m.t,x2:X(i),y2:m.t+ih,stroke:'#1c2435','stroke-width':1}));
+      add('line',{x1:X(i),y1:m.t,x2:X(i),y2:m.t+ih,stroke:'#303c58','stroke-width':1});
+      const t=add('text',{x:X(i),y:H-10,'text-anchor':'middle'}); t.setAttribute('class','svg-ax'); t.textContent=yr;
+    } else if(mo==='04'||mo==='07'||mo==='10'){
+      const t=add('text',{x:X(i),y:H-11,'text-anchor':'middle'}); t.setAttribute('class','svg-mo'); t.textContent=mo+'월';
+      add('line',{x1:X(i),y1:m.t+ih-4,x2:X(i),y2:m.t+ih,stroke:'#3a4765','stroke-width':1});
     }
   });
   // 면적 + 라인
@@ -197,64 +253,71 @@ function lineChart(series, opts){
       area+=(i===0?('M'+px.toFixed(1)+' '+(m.t+ih)+' L'):'L')+px.toFixed(1)+' '+py.toFixed(1)+' ';
     });
     area+='L'+X(n-1).toFixed(1)+' '+(m.t+ih)+' Z';
-    svg.appendChild(add('path',{d:area,fill:'url(#'+k._gid+')',stroke:'none'}));
-    svg.appendChild(add('path',{d:dpath,fill:'none',stroke:k.color,'stroke-width':2.2,'stroke-linejoin':'round','stroke-linecap':'round'}));
-    // 마지막 점 강조
+    add('path',{d:area,fill:'url(#'+k._gid+')',stroke:'none'});
+    add('path',{d:dpath,fill:'none',stroke:k.color,'stroke-width':2.2,'stroke-linejoin':'round','stroke-linecap':'round'});
     const last=series[n-1];
-    svg.appendChild(add('circle',{cx:X(n-1),cy:Y(last[k.field]||0),r:3.2,fill:k.color,stroke:'#0f1420','stroke-width':1.5}));
+    add('circle',{cx:X(n-1),cy:Y(last[k.field]||0),r:3.2,fill:k.color,stroke:'#0f1420','stroke-width':1.5});
   });
+  // hover
+  attachHover(svg,{m,iw,ih,W,H,n,X,onIndex:(i,markG)=>{
+    const d=series[i];
+    keys.forEach(k=>{ svgAdd(markG,'circle',{cx:X(i),cy:Y(d[k.field]||0),r:4,fill:k.color,stroke:'#0f1420','stroke-width':1.5}); });
+    let rows='';
+    keys.forEach(k=>{ rows+=`<div class="tr"><span class="dot" style="background:${k.color}"></span>${k.name}<b>${fmtUSD(d[k.field]||0)}</b></div>`; });
+    const bal=(d.exp_dlr||0)-(d.imp_dlr||0);
+    rows+=`<div class="tr sub">무역수지<b class="${bal>=0?'pos':'neg'}">${fmtUSD(bal)}</b></div>`;
+    return `<div class="th">${ymLong(d.period)}</div>${rows}`;
+  }});
   return svg;
 }
 
 function barChart(items, opts){
   // items: [{label, value}], value 는 % (음수 가능). label 예: "2026Q3"
   items=items.filter(d=>d.value!=null);
-  const svgns='http://www.w3.org/2000/svg';
-  if(!items.length){ const s=document.createElementNS(svgns,'svg'); s.setAttribute('viewBox','0 0 460 120');
-    const t=document.createElementNS(svgns,'text');t.setAttribute('x',230);t.setAttribute('y',60);
-    t.setAttribute('text-anchor','middle');t.setAttribute('class','svg-tip');t.textContent='데이터가 부족합니다';
-    s.appendChild(t); return s; }
+  if(!items.length){ const s=document.createElementNS(SVGNS,'svg'); s.setAttribute('viewBox','0 0 460 120');
+    svgAdd(s,'text',{x:230,y:60,'text-anchor':'middle',class:'svg-tip'}).textContent='데이터가 부족합니다';
+    return s; }
   const W=opts.w||460, H=opts.h||280, m={t:16,r:14,b:46,l:52};
   const iw=W-m.l-m.r, ih=H-m.t-m.b;
   const vals=items.map(d=>d.value);
   const {lo,hi}=niceBounds(Math.min(...vals),Math.max(...vals));
   const n=items.length, step=iw/n;
-  const svg=document.createElementNS(svgns,'svg');
+  const svg=document.createElementNS(SVGNS,'svg');
   svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
   svg.setAttribute('preserveAspectRatio','xMidYMid meet');
-  function add(tag,at){const e=document.createElementNS(svgns,tag);for(const k in at)e.setAttribute(k,at[k]);return e;}
+  const add=(tag,at)=>svgAdd(svg,tag,at);
   const Y=v=> m.t + ih - ((v-lo)/(hi-lo))*ih;
   const zeroY=Y(0);
-  // 그리드
-  for(let g=0;g<=4;g++){
-    const v=lo+(hi-lo)*g/4, y=Y(v);
-    svg.appendChild(add('line',{x1:m.l,y1:y,x2:W-m.r,y2:y,stroke:'#273149','stroke-width':1}));
-    const t=add('text',{x:m.l-8,y:y+3.5,'text-anchor':'end'}); t.setAttribute('class','svg-tip');
-    t.textContent=v.toFixed(0)+'%'; svg.appendChild(t);
+  const cxOf=i=> m.l+step*i+step/2;
+  for(let g=0;g<=4;g++){ const v=lo+(hi-lo)*g/4, y=Y(v);
+    add('line',{x1:m.l,y1:y,x2:W-m.r,y2:y,stroke:'#273149','stroke-width':1});
+    const t=add('text',{x:m.l-8,y:y+3.5,'text-anchor':'end'}); t.setAttribute('class','svg-tip'); t.textContent=v.toFixed(0)+'%';
   }
-  // 0% 기준선 강조
-  svg.appendChild(add('line',{x1:m.l,y1:zeroY,x2:W-m.r,y2:zeroY,stroke:'#4a5675','stroke-width':1.4}));
+  add('line',{x1:m.l,y1:zeroY,x2:W-m.r,y2:zeroY,stroke:'#4a5675','stroke-width':1.4});
   const bw=Math.max(3, Math.min(26, step*0.6));
-  // 라벨 밀도: 겹치지 않도록 간격 계산 (최소 34px 간격)
   const labelEvery=Math.max(1, Math.ceil(34/step));
+  const bars=[];
   items.forEach((d,i)=>{
-    const cx=m.l+step*i+step/2;
-    const v=d.value;
-    const y=Y(v), h=Math.abs(y-zeroY);
-    svg.appendChild(add('rect',{x:cx-bw/2,y:Math.min(y,zeroY),width:bw,height:Math.max(1,h),
-      fill: v>=0?'#4a90ff':'#ff5c6c', rx:2}));
-    // 값 라벨 (막대 끝)
-    if(n<=14){
-      const ty = v>=0 ? Math.min(y,zeroY)-4 : Math.max(y,zeroY)+12;
-      const vt=add('text',{x:cx,y:ty,'text-anchor':'middle'}); vt.setAttribute('class','svg-val');
-      vt.textContent=(v>=0?'+':'')+v.toFixed(0); svg.appendChild(vt);
+    const cx=cxOf(i), v=d.value, y=Y(v), h=Math.abs(y-zeroY);
+    const rect=add('rect',{x:cx-bw/2,y:Math.min(y,zeroY),width:bw,height:Math.max(1,h),
+      fill: v>=0?'#4a90ff':'#ff5c6c', rx:2}); bars.push(rect);
+    if(n<=14){ const ty = v>=0 ? Math.min(y,zeroY)-4 : Math.max(y,zeroY)+12;
+      const vt=add('text',{x:cx,y:ty,'text-anchor':'middle'}); vt.setAttribute('class','svg-val'); vt.textContent=(v>=0?'+':'')+v.toFixed(0);
     }
-    // x축 라벨 (회전해서 잘림 방지)
     if(i%labelEvery===0 || i===n-1){
       const t=add('text',{x:cx,y:H-m.b+16,'text-anchor':'end',transform:`rotate(-40 ${cx} ${H-m.b+16})`});
-      t.setAttribute('class','svg-ax'); t.textContent=d.label; svg.appendChild(t);
+      t.setAttribute('class','svg-ax'); t.textContent=d.label;
     }
   });
+  // hover
+  attachHover(svg,{m,iw,ih,W,H,n,X:cxOf,onIndex:(i,markG)=>{
+    const d=items[i];
+    bars.forEach((b,bi)=>b.setAttribute('opacity', bi===i?1:0.35));
+    svgAdd(markG,'rect',{x:cxOf(i)-bw/2-2,y:m.t,width:bw+4,height:ih,fill:'#ffffff',opacity:0.04});
+    return `<div class="th">${d.label.replace('Q',' Q')}</div>`+
+           `<div class="tr"><span class="dot" style="background:${d.value>=0?'#4a90ff':'#ff5c6c'}"></span>수출 QoQ<b class="${d.value>=0?'pos':'neg'}">${fmtPct(d.value)}</b></div>`;
+  }});
+  svg.addEventListener('mouseleave',()=>bars.forEach(b=>b.setAttribute('opacity',1)));
   return svg;
 }
 
@@ -270,39 +333,46 @@ function niceBounds(minv, maxv){
 function groupedBar(series, opts){
   // series:[{period, expYoy, impYoy}] YoY 두 계열. null(앞 12개월) 구간은 잘라낸다.
   series=series.filter(d=>d.expYoy!=null || d.impYoy!=null);
-  const svgns='http://www.w3.org/2000/svg';
-  if(!series.length){ const s=document.createElementNS(svgns,'svg'); s.setAttribute('viewBox','0 0 450 120');
-    const t=document.createElementNS(svgns,'text');t.setAttribute('x',225);t.setAttribute('y',60);
-    t.setAttribute('text-anchor','middle');t.setAttribute('class','svg-tip');t.textContent='전년동월 데이터가 아직 없습니다';
-    s.appendChild(t); return s; }
-  const W=opts.w||460, H=opts.h||280, m={t:16,r:14,b:30,l:52};
+  if(!series.length){ const s=document.createElementNS(SVGNS,'svg'); s.setAttribute('viewBox','0 0 460 120');
+    svgAdd(s,'text',{x:230,y:60,'text-anchor':'middle',class:'svg-tip'}).textContent='전년동월 데이터가 아직 없습니다';
+    return s; }
+  const W=opts.w||460, H=opts.h||280, m={t:16,r:14,b:34,l:52};
   const iw=W-m.l-m.r, ih=H-m.t-m.b;
   const all=[]; series.forEach(d=>{ if(d.expYoy!=null)all.push(d.expYoy); if(d.impYoy!=null)all.push(d.impYoy);});
   const {lo,hi}=niceBounds(Math.min(...all),Math.max(...all));
   const n=series.length, step=iw/n;
-  const svg=document.createElementNS(svgns,'svg');
+  const svg=document.createElementNS(SVGNS,'svg');
   svg.setAttribute('viewBox',`0 0 ${W} ${H}`); svg.setAttribute('preserveAspectRatio','xMidYMid meet');
-  function add(tag,at){const e=document.createElementNS(svgns,tag);for(const k in at)e.setAttribute(k,at[k]);return e;}
+  const add=(tag,at)=>svgAdd(svg,tag,at);
   const Y=v=> m.t + ih - ((v-lo)/(hi-lo))*ih; const zeroY=Y(0);
-  // 그리드
+  const cxOf=i=> m.l+step*i+step/2;
   for(let g=0;g<=4;g++){ const v=lo+(hi-lo)*g/4,y=Y(v);
-    svg.appendChild(add('line',{x1:m.l,y1:y,x2:W-m.r,y2:y,stroke:'#273149','stroke-width':1}));
-    const t=add('text',{x:m.l-8,y:y+3.5,'text-anchor':'end'});t.setAttribute('class','svg-tip');t.textContent=v.toFixed(0)+'%';svg.appendChild(t);
+    add('line',{x1:m.l,y1:y,x2:W-m.r,y2:y,stroke:'#273149','stroke-width':1});
+    const t=add('text',{x:m.l-8,y:y+3.5,'text-anchor':'end'});t.setAttribute('class','svg-tip');t.textContent=v.toFixed(0)+'%';
   }
-  // 0% 기준선 강조
-  svg.appendChild(add('line',{x1:m.l,y1:zeroY,x2:W-m.r,y2:zeroY,stroke:'#4a5675','stroke-width':1.4}));
+  add('line',{x1:m.l,y1:zeroY,x2:W-m.r,y2:zeroY,stroke:'#4a5675','stroke-width':1.4});
   const bw=Math.max(1.5, Math.min(9, step*0.34));
   let lastYear=null;
   series.forEach((d,i)=>{
-    const cx=m.l+step*i+step/2;
+    const cx=cxOf(i);
     [['expYoy','#4a90ff',-1],['impYoy','#ff5c6c',1]].forEach(([f,c,s])=>{
       const v=d[f]; if(v==null)return;
       const y=Y(v),h=Math.abs(y-zeroY);
-      svg.appendChild(add('rect',{x:cx+(s*bw/2)-(bw/2)+(s*0.6),y:Math.min(y,zeroY),width:bw,height:Math.max(1,h),fill:c,rx:1.5}));
+      add('rect',{x:cx+(s*bw/2)-(bw/2)+(s*0.6),y:Math.min(y,zeroY),width:bw,height:Math.max(1,h),fill:c,rx:1.5});
     });
     const yr=d.period.slice(0,4);
-    if(yr!==lastYear){lastYear=yr;const t=add('text',{x:cx,y:H-9,'text-anchor':'middle'});t.setAttribute('class','svg-ax');t.textContent=yr;svg.appendChild(t);}
+    if(yr!==lastYear){lastYear=yr;const t=add('text',{x:cx,y:H-10,'text-anchor':'middle'});t.setAttribute('class','svg-ax');t.textContent=yr;}
+    else if(d.period.slice(4)==='07'){const t=add('text',{x:cx,y:H-10,'text-anchor':'middle'});t.setAttribute('class','svg-mo');t.textContent='7월';}
   });
+  // hover
+  attachHover(svg,{m,iw,ih,W,H,n,X:cxOf,onIndex:(i,markG)=>{
+    const d=series[i];
+    svgAdd(markG,'rect',{x:cxOf(i)-step/2,y:m.t,width:step,height:ih,fill:'#ffffff',opacity:0.04});
+    let rows='';
+    if(d.expYoy!=null) rows+=`<div class="tr"><span class="dot" style="background:#4a90ff"></span>수출 YoY<b class="${d.expYoy>=0?'pos':'neg'}">${fmtPct(d.expYoy)}</b></div>`;
+    if(d.impYoy!=null) rows+=`<div class="tr"><span class="dot" style="background:#ff5c6c"></span>수입 YoY<b class="${d.impYoy>=0?'pos':'neg'}">${fmtPct(d.impYoy)}</b></div>`;
+    return `<div class="th">${ymLong(d.period)}</div>${rows}`;
+  }});
   return svg;
 }
 

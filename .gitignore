@@ -6,3 +6,5 @@ __pycache__/
 data/*.db
 dashboard.log
 nohup.out
+server.log
+output/

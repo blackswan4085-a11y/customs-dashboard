@@ -1,14 +1,14 @@
 [project]
 name = "customs-dashboard"
-version = "0.1.0"
-description = "관세청 수출입통계 대시보드 (HS 2→4→6 드릴다운, 5개년 월간추이, YoY/QoQ, 관련기업)"
-requires-python = ">=3.11"
+version = "0.2.0"
+description = "관세청 수출입통계 대시보드 (stdlib http.server + 바닐라 JS/SVG): HS 2→4→6 드릴다운, 5개년 월간추이, YoY/QoQ, 관련기업"
+requires-python = ">=3.10"
+# 런타임 서버/대시보드는 표준 라이브러리만 사용합니다(의존성 0).
+# requests 는 데이터 수집(collector.py)에만 필요합니다.
 dependencies = [
     "requests>=2.31",
-    "streamlit>=1.66",
-    "plotly>=5.22",
-    "pandas>=2.2",
 ]
 
-[tool.uv]
-# uv pip install -e . 로 설치 가능
+[project.optional-dependencies]
+# config.yaml 을 PyYAML 로 파싱하고 싶을 때(없으면 내장 최소 파서 사용).
+yaml = ["PyYAML>=6.0"]

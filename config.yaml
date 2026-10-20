@@ -1,0 +1,12 @@
+# 관세청 수출입통계 대시보드 설정
+# 필요한 항목만 지정하면 나머지는 기본값을 사용합니다.
+
+port: 8000          # 서버 포트
+auto_open: true     # 서버 실행 시 브라우저 자동 오픈
+
+customs:
+  # API 키는 보안을 위해 .env(CUSTOMS_API_KEY) 에 두는 것을 권장합니다.
+  # 아래 api_key 를 지정하면 .env 보다 우선합니다.
+  api_key: null
+  months: 60        # 수집할 과거 개월 수 (기본 5년)
+  db_path: data/trade.db

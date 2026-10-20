@@ -302,7 +302,8 @@ function lineChart(series, opts){
     const d=series[i];
     keys.forEach(k=>{ svgAdd(markG,'circle',{cx:X(i),cy:Y(d[k.field]||0),r:4,fill:k.color,stroke:'#0f1420','stroke-width':1.5}); });
     let rows='';
-    keys.forEach(k=>{ rows+=`<div class="tr"><span class="dot" style="background:${k.color}"></span>${k.name}<b>${fmtUSD(d[k.field]||0)}</b></div>`; });
+    keys.forEach(k=>{ const nm=k.name||(k.field==='exp_dlr'?'수출':k.field==='imp_dlr'?'수입':k.field);
+      rows+=`<div class="tr"><span class="dot" style="background:${k.color}"></span>${nm}<b>${fmtUSD(d[k.field]||0)}</b></div>`; });
     const bal=(d.exp_dlr||0)-(d.imp_dlr||0);
     rows+=`<div class="tr sub">무역수지<b class="${bal>=0?'pos':'neg'}">${fmtUSD(bal)}</b></div>`;
     // 가로 십자선은 주 계열(첫번째=수출)에 맞춤
@@ -513,7 +514,7 @@ function renderDetail(detail){
                    '<span><span class="dot" style="background:#ff5c6c"></span>수입(USD)</span>';
   panel.appendChild(el('h2',{},['월간 수출·수입 추이 (최근 5개년)']));
   panel.appendChild(legend);
-  panel.appendChild(lineChart(s,{keys:[{field:'exp_dlr',color:'#4a90ff'},{field:'imp_dlr',color:'#ff5c6c'}]}));
+  panel.appendChild(lineChart(s,{keys:[{field:'exp_dlr',color:'#4a90ff',name:'수출'},{field:'imp_dlr',color:'#ff5c6c',name:'수입'}]}));
   app.appendChild(panel);
 
   // YoY / QoQ 두 패널

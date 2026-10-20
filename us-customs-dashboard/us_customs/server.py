@@ -142,15 +142,29 @@ class Handler(BaseHTTPRequestHandler):
             conn = self._conn()
         return self._json(db.level_summary(conn, code, level, db.latest_month(conn), cty))
 
+    def _collect_countries(self, code):
+        """특정 코드의 국가별 순위 데이터를 온디맨드 수집."""
+        try:
+            import collector
+            conn2 = self._conn()
+            key = self.cfg.api_key or collector.load_api_key()
+            collector.collect_country_breakdown(conn2, key, code)
+        except Exception:  # noqa: BLE001
+            pass
+
     def _detail(self, code, cty):
         conn = self._conn()
         level = len(code)
+        period = db.latest_month(conn)
         # HS4/HS6 상세는 '-' 시계열(2개월 이상)이 없으면 온디맨드 수집.
-        # (목록 수집으로 최근월 1개만 있는 경우도 '없음'으로 간주해 전체 시계열을 받는다)
         if level > 2 and not cty and len(db.monthly_series(conn, code, None)) < 2:
             self._collect(code, min(level + 2, 6))
             conn = self._conn()
-        period = db.latest_month(conn)
+            period = db.latest_month(conn)
+        # 국가별 순위: 전체 모드에서 해당 코드의 개별 국가 데이터가 없으면 온디맨드 수집.
+        if not cty and not db.country_breakdown(conn, code, period, "imp"):
+            self._collect_countries(code)
+            conn = self._conn()
         series = db.monthly_series(conn, code, cty)
         return self._json({
             "prefix": code,

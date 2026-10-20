@@ -30,9 +30,6 @@ header.top h1{font-size:20px;margin:0;letter-spacing:-.3px}
 header.top .title-wrap{display:flex;flex-direction:column;gap:4px}
 header.top .meta{color:var(--muted);font-size:12.5px}
 .top-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.cty-select{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
-  border-radius:9px;padding:9px 12px;font-size:13px;font-weight:600;outline:none;cursor:pointer;min-width:180px}
-.cty-select:focus{border-color:var(--accent)}
 .update-btn{background:linear-gradient(180deg,#5ad1a8,#39b98c);color:#06281e;border:none;
   border-radius:9px;padding:9px 15px;font-weight:700;font-size:13px;cursor:pointer;box-shadow:0 2px 10px rgba(90,209,168,.25)}
 .update-btn:hover{filter:brightness(1.05)}
@@ -155,7 +152,6 @@ def page_html(meta: dict) -> str:
       <span class="meta" id="meta-line">기준월 <b>{latest_disp}</b> · 수집범위 {meta.get('range','-')} · 수집시각 {meta.get('collected_at','-')}</span>
     </div>
     <div class="top-actions">
-      <select id="cty-select" class="cty-select" title="국가 선택"><option value="">전체 국가</option></select>
       <button id="update-btn" class="update-btn" title="Census API에서 최신 데이터를 가져옵니다">⟳ 데이터 업데이트</button>
     </div>
   </header>
@@ -483,12 +479,7 @@ function topBarChart(rows){
 }
 
 // ---------- 렌더 ----------
-function ctyName(){
-  const sel=document.getElementById('cty-select');
-  if(!state.cty) return '전체 국가';
-  const o=sel&&sel.querySelector('option[value="'+state.cty+'"]');
-  return o?o.textContent:state.cty;
-}
+function ctyName(){ return '전체 국가'; }  // 기본 전체 합산 모드
 
 function renderBreadcrumb(names){
   const bc=document.getElementById('breadcrumb'); bc.innerHTML='';
@@ -760,19 +751,6 @@ async function route(){
 // 레벨별 이름 캐시 [HS2, HS4, HS6]
 const namesByLevel=[{},{},{}];
 
-// ---------- 국가 선택 ----------
-async function loadCountries(){
-  try{
-    const list=await api('/api/countries');
-    const sel=document.getElementById('cty-select');
-    if(!sel||!list) return;
-    list.slice(0,60).forEach(c=>{
-      const o=document.createElement('option'); o.value=c.code; o.textContent=c.name||c.code; sel.appendChild(o);
-    });
-    sel.onchange=()=>{ state.cty=sel.value; state.path=[]; route(); };
-  }catch(e){ /* 국가 목록 실패해도 전체 모드로 동작 */ }
-}
-
 // ---------- 데이터 업데이트 버튼 ----------
 function setupUpdate(){
   const btn=document.getElementById('update-btn');
@@ -805,7 +783,6 @@ function setupUpdate(){
   };
 }
 
-loadCountries();
 setupUpdate();
 route();
 """

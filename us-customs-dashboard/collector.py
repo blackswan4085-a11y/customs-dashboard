@@ -318,7 +318,7 @@ def collect_detail(conn, key, hs_prefix, sublevel, months=MONTHS, force=False):
     total = 0
 
     for flow in ("imp", "exp"):
-        # 1) prefix 자체 시계열 (HS2 는 이미 국가별로 수집돼 있으나 '-' 시계열은 없을 수 있음)
+        # 1) prefix 자체 시계열 (HS2 는 기본 수집에서 '-' 시계열이 이미 있음 → 보통 skip)
         if force or not have_series(conn, flow, hs_prefix, plevel):
             rows = fetch_code_series(key, flow, hs_prefix, plevel, start, latest)
             rows = [r for r in rows if r["hs_code"] == hs_prefix]
@@ -333,6 +333,38 @@ def collect_detail(conn, key, hs_prefix, sublevel, months=MONTHS, force=False):
             total += len(rows)
             time.sleep(REQUEST_WAIT)
 
+    return total
+
+
+def have_country_breakdown(conn, flow, hs_code, period) -> bool:
+    """특정 코드/월의 국가별(개별국가) 데이터가 이미 있는지."""
+    row = conn.execute(
+        "SELECT 1 FROM trade_raw WHERE flow=? AND hs_code=? AND period=? "
+        "AND cty_code<>'-' AND cty_code NOT LIKE '0%' AND cty_code NOT LIKE '%X%' LIMIT 1",
+        (flow, hs_code, period),
+    ).fetchone()
+    return row is not None
+
+
+def collect_country_breakdown(conn, key, hs_code, period=None, force=False):
+    """온디맨드: 특정 HS 코드의 '국가별' 데이터를 최근월 1개월만 수집(양방향).
+
+    기본 수집은 전체합산('-')만 받으므로, 상세 화면의 국가별 순위가 필요할 때
+    이 함수로 해당 품목의 개별 국가 데이터를 그때그때 받는다.
+    단일 코드 × 1개월 × 전체국가는 수 초 내로 응답한다.
+    반환: 저장된 행 수.
+    """
+    period = period or latest_in_db(conn) or detect_latest_month(key)
+    level = len(hs_code)
+    total = 0
+    for flow in ("imp", "exp"):
+        if not force and have_country_breakdown(conn, flow, hs_code, period):
+            continue
+        rows = fetch_level(key, flow, hs_code, level, period, period)
+        rows = [r for r in rows if r["hs_code"] == hs_code]
+        save_rows(conn, rows)
+        total += len(rows)
+        time.sleep(REQUEST_WAIT)
     return total
 
 
@@ -388,7 +420,10 @@ def run_collection(progress=None, incremental=True, db_path=None, months=MONTHS)
     for code, _sdesc in codes:
         for flow in ("imp", "exp"):
             step += 1
-            rows = fetch_level(key, flow, code, 2, start, latest)
+            # 전체 국가 합산('-')만 수집 → 품목당 1줄 × 개월수 (한국판 수준으로 가벼움).
+            # 국가별 세부는 상세 화면에서 필요 시 온디맨드(collect_country_breakdown).
+            rows = fetch_code_series(key, flow, code, 2, start, latest)
+            rows = [r for r in rows if r["hs_code"] == code]
             save_rows(conn, rows)
             total += len(rows)
             emit(phase="step", index=step, total=len(codes) * 2,

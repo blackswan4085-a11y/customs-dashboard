@@ -1,0 +1,13 @@
+[project]
+name = "jp-customs-dashboard"
+version = "0.1.0"
+description = "일본 재무성 무역통계(e-Stat) 수출입 대시보드 (stdlib http.server + 바닐라 JS/SVG): HS 2→4→6 드릴다운, 5개년 월간추이, YoY/QoQ, 국가별 순위"
+requires-python = ">=3.10"
+# 런타임 서버/대시보드는 표준 라이브러리만 사용합니다(의존성 0).
+# requests 는 데이터 수집(collector.py)에만 필요합니다.
+dependencies = [
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+yaml = ["PyYAML>=6.0"]

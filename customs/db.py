@@ -135,6 +135,68 @@ def monthly_series(conn: sqlite3.Connection, prefix: str) -> list[dict[str, Any]
     ]
 
 
+def total_series(conn: sqlite3.Connection) -> list[dict]:
+    """전체(모든 HS) 월별 수출/수입 합계 시계열."""
+    sql = """
+        SELECT period, SUM(exp_dlr) AS exp_dlr, SUM(imp_dlr) AS imp_dlr
+        FROM trade_raw GROUP BY period ORDER BY period
+    """
+    return [
+        {"period": r["period"], "exp_dlr": r["exp_dlr"] or 0, "imp_dlr": r["imp_dlr"] or 0}
+        for r in conn.execute(sql)
+    ]
+
+
+def overview(conn: sqlite3.Connection) -> dict:
+    """첫 화면용 종합 지표: 전체 시계열 + 전체 YoY/QoQ + HS2 순위(+YoY/QoQ)."""
+    period = latest_month(conn)
+    series = total_series(conn)
+    exp_yoy = compute_yoy(series, "exp_dlr")
+    imp_yoy = compute_yoy(series, "imp_dlr")
+    q_exp = compute_quarterly(series, "exp_dlr")
+    q_imp = compute_quarterly(series, "imp_dlr")
+
+    # HS2 코드별: 최신월 값 + 각 코드의 YoY/QoQ
+    names2 = representative_names(conn, 2)
+    series2 = all_series_by_level(conn, 2)
+    rows = []
+    for code, s in series2.items():
+        cur = next((x for x in s if x["period"] == period), (s[-1] if s else {"exp_dlr": 0, "imp_dlr": 0}))
+        ey = compute_yoy(s, "exp_dlr")
+        iy = compute_yoy(s, "imp_dlr")
+        qe = compute_quarterly(s, "exp_dlr")
+        ey_last = ey[-1]["yoy"] if ey else None
+        iy_last = iy[-1]["yoy"] if iy else None
+        qe_last = qe[-1]["qoq"] if qe else None
+        rows.append({
+            "code": code, "name": names2.get(code, ""),
+            "exp_dlr": cur["exp_dlr"], "imp_dlr": cur["imp_dlr"],
+            "bal": cur["exp_dlr"] - cur["imp_dlr"],
+            "exp_yoy": ey_last, "imp_yoy": iy_last, "exp_qoq": qe_last,
+        })
+    rows.sort(key=lambda r: r["exp_dlr"], reverse=True)
+
+    last = series[-1] if series else {"exp_dlr": 0, "imp_dlr": 0}
+    return {
+        "period": period,
+        "series": series,
+        "expYoy": exp_yoy,
+        "impYoy": imp_yoy,
+        "qExp": q_exp,
+        "qImp": q_imp,
+        "totals": {
+            "exp_dlr": last["exp_dlr"], "imp_dlr": last["imp_dlr"],
+            "bal": last["exp_dlr"] - last["imp_dlr"],
+            "exp_yoy": exp_yoy[-1]["yoy"] if exp_yoy else None,
+            "imp_yoy": imp_yoy[-1]["yoy"] if imp_yoy else None,
+            "exp_qoq": q_exp[-1]["qoq"] if q_exp else None,
+            "imp_qoq": q_imp[-1]["qoq"] if q_imp else None,
+            "hs2_count": len(rows),
+        },
+        "hs2": rows,
+    }
+
+
 def all_series_by_level(conn: sqlite3.Connection, level: int) -> dict[str, list[dict]]:
     """레벨의 모든 코드에 대한 월별 시계열을 단일 쿼리로 계산.
 

@@ -18,10 +18,22 @@ body{margin:0;background:var(--bg);color:var(--txt);
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Malgun Gothic","Apple SD Gothic Neo",sans-serif;}
 a{color:inherit;text-decoration:none}
 .wrap{max-width:1280px;margin:0 auto;padding:18px 20px 60px}
-header.top{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;
-  border-bottom:1px solid var(--line);padding-bottom:14px;margin-bottom:18px}
+header.top{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;
+  border-bottom:1px solid var(--line);padding-bottom:14px;margin-bottom:14px}
 header.top h1{font-size:20px;margin:0;letter-spacing:-.3px}
+header.top .title-wrap{display:flex;flex-direction:column;gap:4px}
 header.top .meta{color:var(--muted);font-size:12.5px}
+.update-btn{background:linear-gradient(180deg,#5ad1a8,#39b98c);color:#06281e;border:none;
+  border-radius:9px;padding:9px 15px;font-weight:700;font-size:13px;cursor:pointer;box-shadow:0 2px 10px rgba(90,209,168,.25)}
+.update-btn:hover{filter:brightness(1.05)}
+.update-btn:disabled{opacity:.6;cursor:progress;filter:grayscale(.3)}
+.update-status{background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;margin-bottom:14px;font-size:13px;display:flex;align-items:center;gap:12px}
+.update-status .bar{flex:1;height:7px;background:#0e1626;border-radius:6px;overflow:hidden;min-width:120px}
+.update-status .bar>i{display:block;height:100%;background:linear-gradient(90deg,#5ad1a8,#4a90ff);width:0;transition:width .3s}
+.update-status .msg{color:var(--muted);white-space:nowrap}
+.update-status.done{border-color:#2f6b52}
+.update-status.err{border-color:#7a3340}
 .breadcrumb{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0 16px;font-size:13px}
 .breadcrumb .crumb{background:var(--chip);padding:5px 11px;border-radius:999px;cursor:pointer;
   border:1px solid var(--line);white-space:nowrap}
@@ -48,6 +60,33 @@ tr.leaf:hover td{background:transparent}
 .kpi .label{color:var(--muted);font-size:12px;margin-bottom:6px}
 .kpi .val{font-size:19px;font-weight:700;font-variant-numeric:tabular-nums}
 .kpi .sub{font-size:12px;margin-top:4px}
+/* ===== 첫 화면 히어로 / 개요 ===== */
+.hero{background:linear-gradient(135deg,#19233a 0%,#141c2e 60%,#17283a 100%);
+  border:1px solid var(--line);border-radius:16px;padding:20px 22px;position:relative;overflow:hidden}
+.hero::after{content:"";position:absolute;right:-40px;top:-40px;width:220px;height:220px;
+  background:radial-gradient(circle,rgba(90,209,168,.14),transparent 70%)}
+.hero .htitle{font-size:13px;color:var(--muted);margin-bottom:14px;font-weight:600}
+.hero .htitle b{color:var(--txt)}
+.hero-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;position:relative;z-index:1}
+.hero-card{background:#0f172799;border:1px solid var(--line);border-radius:13px;padding:15px 17px}
+.hero-card .hc-label{font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:7px;margin-bottom:9px}
+.hero-card .hc-label .ic{width:8px;height:8px;border-radius:2px;display:inline-block}
+.hero-card .hc-val{font-size:28px;font-weight:800;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
+.hero-card .hc-chips{display:flex;gap:7px;margin-top:11px;flex-wrap:wrap}
+.chip-pct{font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:999px;
+  display:inline-flex;align-items:center;gap:4px;font-variant-numeric:tabular-nums;
+  background:#1b2538;border:1px solid var(--line)}
+.chip-pct .k{color:var(--muted);font-weight:600}
+.chip-pct.up{color:var(--up);border-color:#4a2a30}
+.chip-pct.down{color:var(--down);border-color:#223a63}
+.ov-row2{display:grid;grid-template-columns:1.3fr 1fr;gap:16px}
+@media(max-width:900px){.ov-row2{grid-template-columns:1fr}.hero-grid{grid-template-columns:1fr}}
+.spark-row td{vertical-align:middle}
+.cell-pct{font-weight:700;font-variant-numeric:tabular-nums}
+.mini-bars{display:flex;align-items:flex-end;gap:2px;height:26px}
+.mini-bars i{flex:1;background:#33508a;border-radius:1px;min-height:2px}
+.rankbar{position:relative;height:8px;background:#0e1626;border-radius:5px;overflow:hidden;min-width:60px}
+.rankbar>i{display:block;height:100%;background:linear-gradient(90deg,#4a90ff,#5ad1a8);border-radius:5px}
 .charts{display:grid;grid-template-columns:1fr;gap:16px}
 .charts .full{grid-column:1/-1}
 .chart-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
@@ -102,9 +141,15 @@ def page_html(meta: dict, embedded: dict | None = None) -> str:
 </head><body>
 <div class="wrap">
   <header class="top">
-    <h1>🇰🇷 관세청 수출입통계 대시보드</h1>
-    <span class="meta">기준월 <b>{latest_disp}</b> · 수집범위 {meta.get('range','-')} · 수집시각 {meta.get('collected_at','-')}</span>
+    <div class="title-wrap">
+      <h1>🇰🇷 관세청 수출입통계 대시보드</h1>
+      <span class="meta" id="meta-line">기준월 <b>{latest_disp}</b> · 수집범위 {meta.get('range','-')} · 수집시각 {meta.get('collected_at','-')}</span>
+    </div>
+    <div class="top-actions">
+      <button id="update-btn" class="update-btn" title="관세청 API에서 최신 데이터를 가져옵니다">⟳ 데이터 업데이트</button>
+    </div>
   </header>
+  <div id="update-status" class="update-status" style="display:none"></div>
   <div class="breadcrumb" id="breadcrumb"></div>
   <div id="app" class="grid"></div>
 </div>
@@ -129,6 +174,11 @@ function fmtUSD(v){
 }
 function fmtPct(v){ return (v===null||v===undefined||isNaN(v))?'-':(v>=0?'+':'')+v.toFixed(1)+'%'; }
 function cls(v){ return v>=0?'pos':'neg'; }
+// 방향 색상(한국식): 상승=빨강, 하락=파랑. 증감률(YoY/QoQ) 막대·배지에 사용.
+const UP='#ff5c6c', DOWN='#4a90ff';
+function dirColor(v){ return v>=0?UP:DOWN; }
+// 계열 식별 색상: 수출=파랑, 수입=빨강 (라인/그룹막대 등 2계열 구분용)
+const C_EXP='#4a90ff', C_IMP='#ff5c6c';
 function el(tag,attrs,children){
   const e=document.createElement(tag);
   if(attrs) for(const k in attrs){ if(k==='class')e.className=attrs[k]; else if(k==='html')e.innerHTML=attrs[k]; else e.setAttribute(k,attrs[k]); }
@@ -342,7 +392,7 @@ function barChart(items, opts){
   items.forEach((d,i)=>{
     const cx=cxOf(i), v=d.value, y=Y(v), h=Math.abs(y-zeroY);
     const rect=add('rect',{x:cx-bw/2,y:Math.min(y,zeroY),width:bw,height:Math.max(1,h),
-      fill: v>=0?'#4a90ff':'#ff5c6c', rx:2}); bars.push(rect);
+      fill: dirColor(v), rx:2}); bars.push(rect);
     if(n<=14){ const ty = v>=0 ? Math.min(y,zeroY)-4 : Math.max(y,zeroY)+12;
       const vt=add('text',{x:cx,y:ty,'text-anchor':'middle'}); vt.setAttribute('class','svg-val'); vt.textContent=(v>=0?'+':'')+v.toFixed(0);
     }
@@ -357,7 +407,7 @@ function barChart(items, opts){
     bars.forEach((b,bi)=>b.setAttribute('opacity', bi===i?1:0.35));
     svgAdd(markG,'rect',{x:cxOf(i)-bw/2-2,y:m.t,width:bw+4,height:ih,fill:'#ffffff',opacity:0.04});
     return {html:`<div class="th">${qLabel(d.label)}</div>`+
-           `<div class="tr"><span class="dot" style="background:${v>=0?'#4a90ff':'#ff5c6c'}"></span>수출 QoQ<b class="${v>=0?'pos':'neg'}">${fmtPct(v)}</b></div>`,
+           `<div class="tr"><span class="dot" style="background:${dirColor(v)}"></span>수출 QoQ<b class="${v>=0?'pos':'neg'}">${fmtPct(v)}</b></div>`,
            yFocus:yF, xBadge:qLabel(d.label), yBadge:(v>=0?'+':'')+v.toFixed(1)+'%'};
   }});
   svg.addEventListener('mouseleave',()=>bars.forEach(b=>b.setAttribute('opacity',1)));
@@ -439,22 +489,24 @@ function renderBreadcrumb(names){
 }
 
 let sortState={col:'exp_dlr',dir:-1};
-function renderTable(data, names){
+function renderTable(data, names, opts){
+  opts=opts||{};
   const app=document.getElementById('app');
   const level=(state.path.length+1)*2; // 다음 레벨 (2/4/6)
   const canDrill=level<=6;
   const panel=el('div',{class:'panel'});
-  const title = state.path.length===0 ? 'HS 2자리 — 수출 금액 순위'
+  const title = state.path.length===0 ? 'HS 2자리 — 수출 금액 순위 · 증감률'
     : ('하위 HS '+level+'자리  (클릭하여 드릴다운)');
   panel.appendChild(el('h2',{},[title]));
   const wrap=el('div',{class:'tablewrap'});
   const tbl=el('table');
   const thead=el('thead');
   const trh=el('tr');
-  const cols=[['code','HS코드'],['name','품목명'],['exp_dlr','수출(USD)'],['imp_dlr','수입(USD)'],['bal','무역수지']];
+  let cols=[['code','HS코드'],['name','품목명'],['exp_dlr','수출(USD)'],['imp_dlr','수입(USD)'],['bal','무역수지']];
+  if(opts.withPct) cols=cols.concat([['exp_yoy','수출 YoY'],['exp_qoq','수출 QoQ']]);
   cols.forEach(([k,label])=>{
     const th=el('th',{},[label + (sortState.col===k?(sortState.dir<0?' ▼':' ▲'):'')]);
-    th.onclick=()=>{ if(sortState.col===k)sortState.dir*=-1; else {sortState.col=k;sortState.dir=-1;} renderTable(data,names); };
+    th.onclick=()=>{ if(sortState.col===k)sortState.dir*=-1; else {sortState.col=k;sortState.dir=-1;} renderTable(data,names,opts); };
     trh.appendChild(th);
   });
   thead.appendChild(trh); tbl.appendChild(thead);
@@ -466,21 +518,26 @@ function renderTable(data, names){
       y=sortState.col==='name'?(names.cur[b.code]||''):b.code;
       return x<y?sortState.dir:x>y?-sortState.dir:0;
     }
+    x=(x==null?-1e18:x); y=(y==null?-1e18:y);
     return (x-y)*sortState.dir;
   });
+  function pctCell(v){
+    const td=el('td',{class:'cell-pct '+(v==null?'':(v>=0?'pos':'neg'))},[fmtPct(v)]);
+    return td;
+  }
   rows.forEach(r=>{
     const tr=el('tr',{class:canDrill?'row':'leaf'});
     tr.appendChild(el('td',{class:'code'},[r.code]));
     tr.appendChild(el('td',{class:'name'},[names.cur[r.code]||'']));
     tr.appendChild(el('td',{},[fmtUSD(r.exp_dlr)]));
     tr.appendChild(el('td',{},[fmtUSD(r.imp_dlr)]));
-    const bal=el('td',{class:cls(r.bal)},[fmtUSD(r.bal)]);
-    tr.appendChild(bal);
+    tr.appendChild(el('td',{class:cls(r.bal)},[fmtUSD(r.bal)]));
+    if(opts.withPct){ tr.appendChild(pctCell(r.exp_yoy)); tr.appendChild(pctCell(r.exp_qoq)); }
     if(canDrill) tr.onclick=()=>{ state.path.push(r.code); route(); };
     tb.appendChild(tr);
   });
   tbl.appendChild(tb); wrap.appendChild(tbl); panel.appendChild(wrap);
-  if(canDrill) panel.appendChild(el('div',{class:'hint'},['행을 클릭하면 하위 품목으로 들어갑니다.']));
+  if(canDrill) panel.appendChild(el('div',{class:'hint'},['행을 클릭하면 하위 품목으로 들어갑니다.'+(opts.withPct?'  ·  YoY=전년동월, QoQ=전분기 대비 (상승 빨강/하락 파랑)':'')]));
   app.appendChild(panel);
 }
 
@@ -528,6 +585,8 @@ function renderDetail(detail){
   row.appendChild(p1);
   const p2=el('div',{class:'panel'});
   p2.appendChild(el('h2',{},['전분기 대비 증감률 (수출 QoQ %)']));
+  const lg2=el('div',{class:'legend'}); lg2.innerHTML=`<span><span class="dot" style="background:${UP}"></span>상승</span><span><span class="dot" style="background:${DOWN}"></span>하락</span>`;
+  p2.appendChild(lg2);
   p2.appendChild(barChart(detail.qExp.map(d=>({label:d.label,value:d.qoq})),{}));
   row.appendChild(p2);
   app.appendChild(row);
@@ -570,30 +629,113 @@ function renderCompanies(prefix, level, companies){
   app.appendChild(panel);
 }
 
+// ---------- 첫 화면 개요 ----------
+function pctChip(label, v){
+  const c = v==null ? '' : (v>=0?'up':'down');
+  return `<span class="chip-pct ${c}"><span class="k">${label}</span>${fmtPct(v)}</span>`;
+}
+function renderOverview(ov){
+  const app=document.getElementById('app');
+  const t=ov.totals||{};
+  // 히어로 밴드
+  const hero=el('div',{class:'hero'});
+  const pd=ov.period||LATEST;
+  hero.appendChild(el('div',{class:'htitle',html:`기준월 <b>${pd.slice(0,4)}.${pd.slice(4)}</b> · 전체 품목(HS 2자리 ${t.hs2_count||0}개) 종합`}));
+  const hg=el('div',{class:'hero-grid'});
+  function card(label, color, val, chips){
+    return el('div',{class:'hero-card',html:
+      `<div class="hc-label"><span class="ic" style="background:${color}"></span>${label}</div>`+
+      `<div class="hc-val">${val}</div>`+
+      `<div class="hc-chips">${chips}</div>`});
+  }
+  hg.appendChild(card('총 수출 (최근월)', C_EXP, fmtUSD(t.exp_dlr),
+    pctChip('YoY',t.exp_yoy)+pctChip('QoQ',t.exp_qoq)));
+  hg.appendChild(card('총 수입 (최근월)', C_IMP, fmtUSD(t.imp_dlr),
+    pctChip('YoY',t.imp_yoy)+pctChip('QoQ',t.imp_qoq)));
+  const balCls = (t.bal||0)>=0?'up':'down';
+  hg.appendChild(card('무역수지 (최근월)', '#5ad1a8',
+    `<span class="${(t.bal||0)>=0?'pos':'neg'}">${fmtUSD(t.bal)}</span>`,
+    `<span class="chip-pct ${balCls}">${(t.bal||0)>=0?'흑자':'적자'}</span>`));
+  hero.appendChild(hg);
+  app.appendChild(hero);
+
+  // 전체 추이 + TOP HS2 (2열)
+  const row=el('div',{class:'ov-row2'});
+  const p1=el('div',{class:'panel'});
+  p1.appendChild(el('h2',{},['전체 수출·수입 월간 추이 (최근 5개년)']));
+  const lg=el('div',{class:'legend'});
+  lg.innerHTML=`<span><span class="dot" style="background:${C_EXP}"></span>수출</span><span><span class="dot" style="background:${C_IMP}"></span>수입</span>`;
+  p1.appendChild(lg);
+  p1.appendChild(lineChart(ov.series,{keys:[{field:'exp_dlr',color:C_EXP,name:'수출'},{field:'imp_dlr',color:C_IMP,name:'수입'}],h:300}));
+  row.appendChild(p1);
+
+  const p2=el('div',{class:'panel'});
+  p2.appendChild(el('h2',{},['수출 상위 품목 TOP 10 (HS 2자리)']));
+  p2.appendChild(topBarChart(ov.hs2.slice(0,10)));
+  row.appendChild(p2);
+  app.appendChild(row);
+}
+
+// 가로 막대 랭킹 차트 (SVG)
+function topBarChart(rows){
+  const W=460, rowH=26, m={t:6,r:14,b:6,l:46};
+  const H=m.t+m.b+rows.length*rowH;
+  const maxv=Math.max(1,...rows.map(r=>r.exp_dlr));
+  const svg=document.createElementNS(SVGNS,'svg');
+  svg.setAttribute('viewBox',`0 0 ${W} ${H}`); svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+  const iw=W-m.l-m.r;
+  rows.forEach((r,i)=>{
+    const y=m.t+i*rowH, bw=Math.max(2,(r.exp_dlr/maxv)*iw);
+    const g=svgAdd(svg,'g',{});
+    svgAdd(g,'text',{x:m.l-6,y:y+rowH/2+4,'text-anchor':'end',class:'svg-ax'}).textContent=r.code;
+    svgAdd(g,'rect',{x:m.l,y:y+4,width:iw,height:rowH-11,rx:4,fill:'#0e1626'});
+    const grad=svgAdd(g,'rect',{x:m.l,y:y+4,width:bw,height:rowH-11,rx:4,fill:'#4a90ff'});
+    svgAdd(g,'text',{x:m.l+8,y:y+rowH/2+4,class:'svg-val'}).textContent=(r.name||'').slice(0,10);
+    svgAdd(g,'text',{x:W-m.r,y:y+rowH/2+4,'text-anchor':'end',class:'svg-val'}).textContent=fmtUSD(r.exp_dlr);
+    // hover 툴팁
+    const hit=svgAdd(g,'rect',{x:0,y:y,width:W,height:rowH,fill:'transparent'});
+    hit.addEventListener('mousemove',e=>{ grad.setAttribute('fill','#5ad1a8');
+      showTip(`<div class="th">HS ${r.code} ${r.name||''}</div>`+
+        `<div class="tr"><span class="dot" style="background:${C_EXP}"></span>수출<b>${fmtUSD(r.exp_dlr)}</b></div>`+
+        `<div class="tr"><span class="dot" style="background:${C_IMP}"></span>수입<b>${fmtUSD(r.imp_dlr)}</b></div>`+
+        `<div class="tr sub">YoY<b class="${r.exp_yoy>=0?'pos':'neg'}">${fmtPct(r.exp_yoy)}</b></div>`+
+        `<div class="tr sub">QoQ<b class="${r.exp_qoq>=0?'pos':'neg'}">${fmtPct(r.exp_qoq)}</b></div>`, e.clientX, e.clientY); });
+    hit.addEventListener('mouseleave',()=>{ grad.setAttribute('fill','#4a90ff'); hideTip(); });
+    hit.style&&(hit.style.cursor='pointer');
+  });
+  return svg;
+}
+
 // ---------- 라우팅 ----------
 async function route(){
   const app=document.getElementById('app'); app.innerHTML='';
-  const key=pathKey();
-  // 대표명 레벨별 캐시 로드
   const names=await loadNames();
   renderBreadcrumb(names.levels);
 
-  if(state.path.length>0){
-    // 상세 (현재 선택된 가장 깊은 코드)
-    const prefix=state.path[state.path.length-1];
-    const detail=await api('/api/detail?code='+prefix);
-    if(detail){ renderDetail(detail); }
-    else if(STATIC){
-      const app=document.getElementById('app');
-      const p=el('div',{class:'panel'});
-      p.appendChild(el('h2',{},['📊 HS '+prefix]));
-      p.appendChild(el('div',{class:'empty'},['정적 리포트에서는 HS 6자리 상세 차트를 포함하지 않습니다. 서버 모드(python run.py)에서 확인하세요. 아래 하위 품목 표는 사용할 수 있습니다.']));
-      app.appendChild(p);
+  if(state.path.length===0){
+    // 첫 화면: 개요(히어로+차트) + YoY/QoQ 포함 HS2 표
+    const ov=await api('/api/overview');
+    if(ov){ renderOverview(ov);
+      const data=ov.hs2.map(r=>({code:r.code,exp_dlr:r.exp_dlr,imp_dlr:r.imp_dlr,bal:r.bal,
+        exp_yoy:r.exp_yoy,imp_yoy:r.imp_yoy,exp_qoq:r.exp_qoq}));
+      names.cur=names.levels[0]||{};
+      renderTable(data, names, {withPct:true});
     }
+    window.scrollTo({top:0,behavior:'smooth'});
+    return;
+  }
+
+  // 상세 (현재 선택된 가장 깊은 코드)
+  const prefix=state.path[state.path.length-1];
+  const detail=await api('/api/detail?code='+prefix);
+  if(detail){ renderDetail(detail); }
+  else if(STATIC){
+    const p=el('div',{class:'panel'});
+    p.appendChild(el('h2',{},['📊 HS '+prefix]));
+    p.appendChild(el('div',{class:'empty'},['정적 리포트에서는 HS 6자리 상세 차트를 포함하지 않습니다. 서버 모드(python run.py)에서 확인하세요. 아래 하위 품목 표는 사용할 수 있습니다.']));
+    app.appendChild(p);
   }
   if(state.path.length<3){
-    // 하위 목록 표
-    const prefix=state.path.length?state.path[state.path.length-1]:'';
     const level=(state.path.length+1)*2;
     const data=await api('/api/level?code='+encodeURIComponent(prefix)+'&level='+level);
     names.cur=names.levels[state.path.length]||{};
@@ -610,6 +752,40 @@ async function loadNames(){
   return _namesCache;
 }
 
+// ---------- 데이터 업데이트 버튼 ----------
+function setupUpdate(){
+  const btn=document.getElementById('update-btn');
+  const box=document.getElementById('update-status');
+  if(!btn) return;
+  if(STATIC){ btn.style.display='none'; return; }
+  function showStatus(cls, html){ box.className='update-status '+(cls||''); box.style.display='flex'; box.innerHTML=html; }
+  async function poll(){
+    const st=await api('/api/collect/status');
+    const pct = st.total? Math.round((st.index/st.total)*100) : (st.phase==='detect'?5:0);
+    if(st.running){
+      showStatus('', `<div class="bar"><i style="width:${pct}%"></i></div><span class="msg">${st.message||'수집 중...'} (${st.index}/${st.total||'?'})</span>`);
+      setTimeout(poll, 900);
+    } else if(st.phase==='error'){
+      showStatus('err', `<span class="msg">⚠ 업데이트 실패: ${st.message||st.error}</span> <button class="ghost" onclick="this.closest('.update-status').style.display='none'">닫기</button>`);
+      btn.disabled=false; btn.textContent='⟳ 데이터 업데이트';
+    } else if(st.phase==='done' && st.summary){
+      const s=st.summary;
+      showStatus('done', `<span class="msg">✅ 업데이트 완료 · 기준월 ${s.latest_month} · ${s.months_fetched}개월 수집 · 총 ${s.total_rows.toLocaleString()}행</span> <button class="ghost" id="reload-btn">새로고침</button>`);
+      btn.disabled=false; btn.textContent='⟳ 데이터 업데이트';
+      const rb=document.getElementById('reload-btn'); if(rb) rb.onclick=()=>location.reload();
+    }
+  }
+  btn.onclick=async()=>{
+    if(!confirm('관세청 API에서 최신 데이터를 가져옵니다.\n기존 최신월 이후만 증분 수집하며, 네트워크 상태에 따라 수십 초~수 분 걸릴 수 있습니다.\n계속할까요?')) return;
+    btn.disabled=true; btn.textContent='⟳ 수집 중...';
+    const r=await apiPost('/api/collect',{});
+    if(r && r.ok===false){ showStatus('err',`<span class="msg">⚠ ${r.error}</span>`); btn.disabled=false; btn.textContent='⟳ 데이터 업데이트'; return; }
+    showStatus('', `<div class="bar"><i style="width:3%"></i></div><span class="msg">수집 시작...</span>`);
+    poll();
+  };
+}
+
+setupUpdate();
 route();
 """
 
@@ -632,6 +808,7 @@ def build_static(conn, meta: dict) -> str:
         names[lv] = db.representative_names(conn, lv)
         embedded[f"/api/names?level={lv}"] = names[lv]
 
+    embedded["/api/overview"] = db.overview(conn)
     companies = db.all_companies(conn)
 
     # 레벨별 전체 시계열(일괄) → 집계표 + 상세 임베드.

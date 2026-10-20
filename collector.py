@@ -173,45 +173,71 @@ def save_rows(conn, rows):
     conn.commit()
 
 
-def main():
+def run_collection(progress=None, incremental=True, db_path=None):
+    """데이터 수집 실행.
+
+    progress: callable(dict) — 진행상황 콜백 (서버 업데이트 버튼용)
+    incremental: True 면 이미 저장된 가장 최신월 이후만 수집 (기존 데이터 유지).
+                 신규 월이 없으면 최신월 1개는 재수집(갱신)한다.
+    반환: 요약 dict
+    """
+    def emit(**kw):
+        if progress:
+            progress(kw)
+
     key = load_api_key()
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    path = db_path or DB_PATH
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    conn = sqlite3.connect(path)
     init_db(conn)
 
-    print("최신 가용 월 탐지 중...")
+    emit(phase="detect", message="최신 가용 월 탐지 중...")
     latest = detect_latest_month(key)
-    print(f"  최신월: {latest}")
+    emit(phase="detected", latest=latest, message=f"최신 가용 월: {latest}")
 
-    months = month_range(latest, MONTHS)
-    print(f"수집 대상: {months[0]} ~ {months[-1]} ({len(months)}개월)")
+    full_months = month_range(latest, MONTHS)
+
+    # 증분: 기존 최신월 이후(+기존 최신월 1개 갱신)만
+    existing = conn.execute("SELECT MAX(period) AS p FROM trade_raw").fetchone()[0]
+    if incremental and existing:
+        months = [m for m in full_months if m >= existing]
+    else:
+        months = full_months
+
+    emit(phase="start", total=len(months), first=months[0], last=months[-1],
+         message=f"수집 대상 {months[0]}~{months[-1]} ({len(months)}개월)")
 
     total = 0
     for i, yymm in enumerate(months, 1):
         _, rows = fetch_month(key, yymm)
         save_rows(conn, rows)
         total += len(rows)
-        print(f"  [{i:2d}/{len(months)}] {yymm}: {len(rows):>5d} rows  (누적 {total})")
+        emit(phase="month", index=i, total=len(months), period=yymm,
+             rows=len(rows), cumulative=total,
+             message=f"[{i}/{len(months)}] {yymm}: {len(rows)} rows")
         time.sleep(REQUEST_WAIT)
 
-    conn.execute(
-        "INSERT OR REPLACE INTO collection_meta(key, value) VALUES (?, ?)",
+    for k, v in (
         ("latest_month", latest),
-    )
-    conn.execute(
-        "INSERT OR REPLACE INTO collection_meta(key, value) VALUES (?, ?)",
         ("collected_at", dt.datetime.now().isoformat(timespec="seconds")),
-    )
-    conn.execute(
-        "INSERT OR REPLACE INTO collection_meta(key, value) VALUES (?, ?)",
-        ("range", f"{months[0]}-{months[-1]}"),
-    )
+        ("range", f"{full_months[0]}-{full_months[-1]}"),
+    ):
+        conn.execute("INSERT OR REPLACE INTO collection_meta(key, value) VALUES (?, ?)", (k, v))
     conn.commit()
 
     cnt = conn.execute("SELECT COUNT(*) FROM trade_raw").fetchone()[0]
     mn = conn.execute("SELECT MIN(period), MAX(period) FROM trade_raw").fetchone()
-    print(f"\n완료. trade_raw 총 {cnt} 행, 기간 {mn[0]}~{mn[1]}")
     conn.close()
+    summary = {"latest_month": latest, "months_fetched": len(months),
+               "rows_added": total, "total_rows": cnt,
+               "range": f"{mn[0]}~{mn[1]}"}
+    emit(phase="done", **summary, message=f"완료. 총 {cnt} 행, 기간 {mn[0]}~{mn[1]}")
+    return summary
+
+
+def main():
+    # CLI 는 전체 재수집 (기존 동작 유지)
+    run_collection(progress=lambda e: print("  "+e.get("message","")), incremental=False)
 
 
 if __name__ == "__main__":

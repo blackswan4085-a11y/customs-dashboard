@@ -28,6 +28,48 @@ def _json_bytes(obj) -> bytes:
     return json.dumps(obj, ensure_ascii=False).encode("utf-8")
 
 
+# 수집(업데이트) 진행 상태 — 단일 서버 프로세스 내 공유
+_collect_state = {
+    "running": False,
+    "phase": "idle",
+    "message": "",
+    "index": 0,
+    "total": 0,
+    "latest": None,
+    "error": None,
+    "summary": None,
+}
+_collect_lock = threading.Lock()
+
+
+def _run_collect_bg(cfg: Config):
+    import collector
+
+    def progress(ev):
+        with _collect_lock:
+            _collect_state.update({
+                "phase": ev.get("phase", _collect_state["phase"]),
+                "message": ev.get("message", _collect_state["message"]),
+                "index": ev.get("index", _collect_state["index"]),
+                "total": ev.get("total", _collect_state["total"]),
+                "latest": ev.get("latest", _collect_state["latest"]),
+            })
+
+    try:
+        summary = collector.run_collection(
+            progress=progress, incremental=True, db_path=cfg.db_abspath
+        )
+        with _collect_lock:
+            _collect_state.update({"summary": summary, "phase": "done"})
+    except Exception as e:  # noqa: BLE001
+        with _collect_lock:
+            _collect_state.update({"error": str(e), "phase": "error",
+                                   "message": f"오류: {e}"})
+    finally:
+        with _collect_lock:
+            _collect_state["running"] = False
+
+
 class Handler(BaseHTTPRequestHandler):
     cfg: Config = None  # 클래스 속성으로 주입
 
@@ -73,6 +115,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(db.level_summary(conn, code, level, period))
             if path == "/api/detail":
                 return self._detail(qs.get("code", [""])[0])
+            if path == "/api/overview":
+                conn = self._conn()
+                return self._json(db.overview(conn))
+            if path == "/api/collect/status":
+                with _collect_lock:
+                    return self._json(dict(_collect_state))
             return self._send(404, b"not found", "text/plain")
         except Exception as e:  # noqa: BLE001
             return self._json({"error": str(e)}, code=500)
@@ -132,6 +180,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True})
             if u.path == "/api/company/delete":
                 db.delete_company(conn, int(body.get("id")))
+                return self._json({"ok": True})
+            if u.path == "/api/collect":
+                with _collect_lock:
+                    if _collect_state["running"]:
+                        return self._json({"ok": False, "error": "이미 수집이 진행 중입니다."})
+                    _collect_state.update({"running": True, "phase": "start",
+                                           "message": "수집 시작...", "index": 0,
+                                           "total": 0, "error": None, "summary": None})
+                threading.Thread(target=_run_collect_bg, args=(self.cfg,), daemon=True).start()
                 return self._json({"ok": True})
             return self._json({"ok": False, "error": "unknown route"}, code=404)
         except Exception as e:  # noqa: BLE001

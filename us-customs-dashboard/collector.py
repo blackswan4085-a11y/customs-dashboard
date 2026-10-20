@@ -230,22 +230,26 @@ def fetch_level(key, flow, hs_code, level, start, end, country=None):
     return _rows_from(_get(key, f["url"], params), flow, level)
 
 
-def fetch_all_hs2(key, flow, start, end):
-    """기본 수집용: 전체 HS2 × 전체합산('-') × 기간범위를 '한 번의 호출' 로 받는다.
+def fetch_all_level(key, flow, level, start, end):
+    """기본 수집용: 특정 HS 레벨(2/4/6) 전체 × 전체합산('-') × 기간범위를 한 번에 받는다.
 
-    품목·월당 1줄(약 98종 × 개월수)이라 응답이 작아 단일 호출로 충분하다.
-    → 수입/수출 합쳐 단 2회 호출로 HS2 전량 수집이 끝난다.
+    품목 필터(와일드카드) 없이 COMM_LVL + CTY_CODE='-' + 기간범위로 요청하면
+    레벨과 무관하게 단일 호출로 수 초~십수 초 내 응답한다.
+      - HS2: 약 98종 × 개월수
+      - HS4: 약 1,200종 × 개월수
+      - HS6: 약 5,400종 × 개월수
+    → 레벨당 수입/수출 2회, 3레벨 합쳐 6회 호출로 전량 수집이 끝난다.
     """
     f = FLOW[flow]
     params = {
         "get": f"{f['commodity']},{f['sdesc']},{f['value']},CTY_CODE,CTY_NAME",
-        "COMM_LVL": "HS2",
+        "COMM_LVL": f"HS{level}",
         "CTY_CODE": "-",
         "time": time_range(start, end),
     }
-    rows = _rows_from(_get(key, f["url"], params), flow, 2)
-    # HS2 는 정확히 2자리 코드만 남긴다(안전차원)
-    return [r for r in rows if len(r["hs_code"]) == 2]
+    rows = _rows_from(_get(key, f["url"], params), flow, level)
+    # 정확히 'level' 자리 코드만 남긴다(안전차원)
+    return [r for r in rows if len(r["hs_code"]) == level]
 
 
 def fetch_sublevel_month(key, flow, hs_prefix, level, period):
@@ -425,24 +429,27 @@ def run_collection(progress=None, incremental=True, db_path=None, months=MONTHS)
     else:
         start = full_start
 
-    # 전체 HS2(약 98종) × 전체합산('-') × 기간을 수입/수출 각 1회 호출로 전량 수집.
-    # 품목·월당 1줄이라 응답이 작아 단일 호출로 충분 → 총 2회 호출로 끝난다.
-    emit(phase="start", total=2, first=start, last=latest,
-         message=f"HS2 전량 수집 ({start}~{latest}) · 수입/수출 2회 호출")
+    # HS2/HS4/HS6 전체 × 전체합산('-') × 기간을 각 레벨 수입/수출 1회씩, 총 6회 호출로 전량 수집.
+    # 전체합산은 레벨 무관하게 단일 호출로 빠르게 응답하므로 드릴다운을 미리 다 받아둔다.
+    levels = (2, 4, 6)
+    total_steps = len(levels) * 2
+    emit(phase="start", total=total_steps, first=start, last=latest,
+         message=f"HS2/4/6 전량 수집 ({start}~{latest}) · 총 {total_steps}회 호출")
 
     total = 0
     step = 0
-    for flow in ("imp", "exp"):
-        step += 1
-        label = "수입" if flow == "imp" else "수출"
-        emit(phase="step", index=step, total=2, flow=flow, cumulative=total,
-             message=f"[{step}/2] 전체 HS2 {label} 수집 중...")
-        rows = fetch_all_hs2(key, flow, start, latest)
-        save_rows(conn, rows)
-        total += len(rows)
-        emit(phase="step", index=step, total=2, flow=flow,
-             rows=len(rows), cumulative=total,
-             message=f"[{step}/2] 전체 HS2 {label}: {len(rows)} rows")
+    for level in levels:
+        for flow in ("imp", "exp"):
+            step += 1
+            label = "수입" if flow == "imp" else "수출"
+            emit(phase="step", index=step, total=total_steps, level=level, flow=flow,
+                 cumulative=total, message=f"[{step}/{total_steps}] HS{level} {label} 수집 중...")
+            rows = fetch_all_level(key, flow, level, start, latest)
+            save_rows(conn, rows)
+            total += len(rows)
+            emit(phase="step", index=step, total=total_steps, level=level, flow=flow,
+                 rows=len(rows), cumulative=total,
+                 message=f"[{step}/{total_steps}] HS{level} {label}: {len(rows)} rows")
 
     for k, v in (
         ("latest_month", latest),
@@ -453,13 +460,16 @@ def run_collection(progress=None, incremental=True, db_path=None, months=MONTHS)
         conn.execute("INSERT OR REPLACE INTO collection_meta(key, value) VALUES (?, ?)", (k, v))
     conn.commit()
 
-    cnt = conn.execute("SELECT COUNT(*) FROM trade_raw WHERE hs_level=2").fetchone()[0]
+    cnt = conn.execute(
+        "SELECT COUNT(*) FROM trade_raw WHERE cty_code='-' AND hs_level IN (2,4,6)"
+    ).fetchone()[0]
+    hs2cnt = conn.execute("SELECT COUNT(*) FROM trade_raw WHERE hs_level=2").fetchone()[0]
     mn = conn.execute("SELECT MIN(period), MAX(period) FROM trade_raw").fetchone()
     conn.close()
     summary = {"latest_month": latest, "steps": step, "rows_added": total,
-               "hs2_rows": cnt, "range": f"{mn[0]}~{mn[1]}"}
+               "total_rows": cnt, "hs2_rows": hs2cnt, "range": f"{mn[0]}~{mn[1]}"}
     emit(phase="done", **summary,
-         message=f"완료. HS2 {cnt} 행, 기간 {mn[0]}~{mn[1]}")
+         message=f"완료. 총 {cnt} 행(HS2/4/6), 기간 {mn[0]}~{mn[1]}")
     return summary
 
 

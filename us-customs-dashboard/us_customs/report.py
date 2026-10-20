@@ -734,8 +734,7 @@ async function route(){
 
   const prefix=state.path[state.path.length-1];
   const nextLevel=(state.path.length+1)*2;
-  const needFetch = state.path.length>0 && state.path.length<=2; // HS4/HS6 온디맨드 가능
-  showLoading(needFetch? 'Census에서 하위 품목 데이터를 가져오는 중... (최초 1회는 수십 초 걸릴 수 있습니다)':'불러오는 중...');
+  showLoading('불러오는 중...');  // HS4/HS6 는 기본 수집됨 → 즉시, 국가별 순위만 최초 수 초
 
   const detail=await api('/api/detail?code='+encodeURIComponent(prefix)+ctyParam());
   app.innerHTML=''; renderBreadcrumb(namesByLevel);
@@ -768,7 +767,7 @@ function setupUpdate(){
       btn.disabled=false; btn.textContent='⟳ 데이터 업데이트';
     } else if(st.phase==='done' && st.summary){
       const s=st.summary;
-      showStatus('done', `<span class="msg">✅ 업데이트 완료 · 기준월 ${s.latest_month} · HS2 ${Number(s.hs2_rows||0).toLocaleString()}행</span> <button class="ghost" id="reload-btn">새로고침</button>`);
+      showStatus('done', `<span class="msg">✅ 업데이트 완료 · 기준월 ${s.latest_month} · HS2/4/6 ${Number(s.total_rows||s.hs2_rows||0).toLocaleString()}행</span> <button class="ghost" id="reload-btn">새로고침</button>`);
       btn.disabled=false; btn.textContent='⟳ 데이터 업데이트';
       const rb=document.getElementById('reload-btn'); if(rb) rb.onclick=()=>location.reload();
     }

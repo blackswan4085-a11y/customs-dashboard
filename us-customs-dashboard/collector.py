@@ -216,10 +216,7 @@ def _rows_from(resp, flow, level):
 
 
 def fetch_level(key, flow, hs_code, level, start, end, country=None):
-    """HS2 전량 수집용: 정확히 'level' 자리 코드(hs_code)를 국가별 × 기간범위로 조회.
-
-    HS2 조회(level==len(hs_code))는 Census 에서 빠르다. 국가 차원 전체 포함.
-    """
+    """특정 'level' 자리 코드(hs_code)를 국가별 × 기간범위로 조회(국가별 순위 등에 사용)."""
     f = FLOW[flow]
     params = {
         "get": f"{f['commodity']},{f['sdesc']},{f['value']},CTY_CODE,CTY_NAME",
@@ -231,6 +228,24 @@ def fetch_level(key, flow, hs_code, level, start, end, country=None):
     if country:
         params["CTY_CODE"] = country
     return _rows_from(_get(key, f["url"], params), flow, level)
+
+
+def fetch_all_hs2(key, flow, start, end):
+    """기본 수집용: 전체 HS2 × 전체합산('-') × 기간범위를 '한 번의 호출' 로 받는다.
+
+    품목·월당 1줄(약 98종 × 개월수)이라 응답이 작아 단일 호출로 충분하다.
+    → 수입/수출 합쳐 단 2회 호출로 HS2 전량 수집이 끝난다.
+    """
+    f = FLOW[flow]
+    params = {
+        "get": f"{f['commodity']},{f['sdesc']},{f['value']},CTY_CODE,CTY_NAME",
+        "COMM_LVL": "HS2",
+        "CTY_CODE": "-",
+        "time": time_range(start, end),
+    }
+    rows = _rows_from(_get(key, f["url"], params), flow, 2)
+    # HS2 는 정확히 2자리 코드만 남긴다(안전차원)
+    return [r for r in rows if len(r["hs_code"]) == 2]
 
 
 def fetch_sublevel_month(key, flow, hs_prefix, level, period):
@@ -410,26 +425,24 @@ def run_collection(progress=None, incremental=True, db_path=None, months=MONTHS)
     else:
         start = full_start
 
-    emit(phase="hs2list", message="HS2 품목 목록 조회 중...")
-    codes = hs2_codes(key, latest)
-    emit(phase="start", total=len(codes) * 2, first=start, last=latest,
-         message=f"HS2 {len(codes)}종 × 수입/수출 수집 ({start}~{latest})")
+    # 전체 HS2(약 98종) × 전체합산('-') × 기간을 수입/수출 각 1회 호출로 전량 수집.
+    # 품목·월당 1줄이라 응답이 작아 단일 호출로 충분 → 총 2회 호출로 끝난다.
+    emit(phase="start", total=2, first=start, last=latest,
+         message=f"HS2 전량 수집 ({start}~{latest}) · 수입/수출 2회 호출")
 
     total = 0
     step = 0
-    for code, _sdesc in codes:
-        for flow in ("imp", "exp"):
-            step += 1
-            # 전체 국가 합산('-')만 수집 → 품목당 1줄 × 개월수 (한국판 수준으로 가벼움).
-            # 국가별 세부는 상세 화면에서 필요 시 온디맨드(collect_country_breakdown).
-            rows = fetch_code_series(key, flow, code, 2, start, latest)
-            rows = [r for r in rows if r["hs_code"] == code]
-            save_rows(conn, rows)
-            total += len(rows)
-            emit(phase="step", index=step, total=len(codes) * 2,
-                 hs=code, flow=flow, rows=len(rows), cumulative=total,
-                 message=f"[{step}/{len(codes) * 2}] HS{code} {flow}: {len(rows)} rows")
-            time.sleep(REQUEST_WAIT)
+    for flow in ("imp", "exp"):
+        step += 1
+        label = "수입" if flow == "imp" else "수출"
+        emit(phase="step", index=step, total=2, flow=flow, cumulative=total,
+             message=f"[{step}/2] 전체 HS2 {label} 수집 중...")
+        rows = fetch_all_hs2(key, flow, start, latest)
+        save_rows(conn, rows)
+        total += len(rows)
+        emit(phase="step", index=step, total=2, flow=flow,
+             rows=len(rows), cumulative=total,
+             message=f"[{step}/2] 전체 HS2 {label}: {len(rows)} rows")
 
     for k, v in (
         ("latest_month", latest),

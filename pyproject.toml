@@ -1,0 +1,14 @@
+[project]
+name = "customs-dashboard"
+version = "0.1.0"
+description = "관세청 수출입통계 대시보드 (HS 2→4→6 드릴다운, 5개년 월간추이, YoY/QoQ, 관련기업)"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.31",
+    "streamlit>=1.66",
+    "plotly>=5.22",
+    "pandas>=2.2",
+]
+
+[tool.uv]
+# uv pip install -e . 로 설치 가능
